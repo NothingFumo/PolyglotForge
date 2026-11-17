@@ -27,3 +27,11 @@
 *.log
 .DS_Store
 Thumbs.db
+
+# 第三方源码与构建产物不入库（由各阶段 build.sh 下载/生成）
+stages/*/vendor/
+stages/*/out/
+stages/*/bin/
+stages/*/obj/
+stages/*/target/
+stages/kotlin/build/
