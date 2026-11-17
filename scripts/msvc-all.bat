@@ -37,6 +37,10 @@ echo [msvc] 编译 C++ 解析器
 cl /nologo /c /O2 /std:c++17 /EHsc /Igen /Icontracts /Foout\msvc\ stages\cpp\parser.cpp
 if errorlevel 1 exit /b 1
 
+echo [msvc] 准备 Python 标准库载荷
+if not exist out\payload_blob.obj pushd out && "%PYEXE%" ..\scripts\make_payload.py && C:\Strawberry\c\bin\ld.exe -r -b binary payload\lib.zip -o payload_blob.obj && popd
+if not exist out\payload_blob.obj (echo [msvc] 载荷对象生成失败 & exit /b 1)
+
 echo [msvc] 改写 GNU COFF（.ctors 改成 .CRT$XCU、COMDAT 关联化、长节名折叠）
 "%PYEXE%" stages\stubs\coff_msvc_fix.py stages\kotlin\build\libqf_kt.a out\msvc\mingw\libqf_kt.a || exit /b 1
 "%PYEXE%" stages\stubs\coff_msvc_fix.py "%CXXLIB%" out\msvc\mingw\libstdc++.a || exit /b 1
@@ -49,6 +53,6 @@ echo [msvc] 链接
 rem /FORCE:MULTIPLE：mingwex 与 ucrt 都提供 ldexp/modf/round 等 C99 数学函数，
 rem 以及 __guard_check_icall_fptr 这类 CFG 桩。两套 CRT 混装时这是必然重叠，
 rem 语义一致（都是 ucrt 的转发），实测只影响 warning 而不影响行为。
-link /nologo /FORCE:MULTIPLE /OUT:dist\queryforge-all.exe /SUBSYSTEM:CONSOLE out\msvc\main.obj out\msvc\arena.obj out\msvc\host.obj out\msvc\engine.obj out\msvc\stubs.obj out\msvc\parser.obj out\msvc\mingw_compat.obj out\msvc\go_crt_init.obj stages\rust\target\x86_64-pc-windows-msvc\release\qf_rust.lib stages\csharp\out\qf_cs.lib out\msvc\mingw\libqf_kt.a "%AOT%\bootstrapperdll.obj" "%AOT%\Runtime.WorkstationGC.lib" "%AOT%\Runtime.VxsortEnabled.lib" "%AOT%\eventpipe-disabled.lib" "%AOT%\standalonegc-disabled.lib" "%AOT%\aotminipal.lib" "%AOT%\System.IO.Compression.Native.Aot.lib" "%AOT%\System.Globalization.Native.Aot.lib" "%AOT%\zlibstatic.lib" "%AOT%\brotlienc.lib" "%AOT%\brotlidec.lib" "%AOT%\brotlicommon.lib" stages\go\out\libqf_go.a stages\js\out\libqf_js.a out\msvc\mingw\libstdc++.a out\msvc\mingw\libmingwex.a out\msvc\mingw\libwinpthread.a out\msvc\mingw\libgcc.a out\msvc\mingw\libgcc_eh.a stages\python\out\qf_py.obj stages\python\out\python311.lib kernel32.lib user32.lib advapi32.lib ws2_32.lib ole32.lib oleaut32.lib uuid.lib bcrypt.lib ntdll.lib msvcrt.lib legacy_stdio_definitions.lib version.lib pathcch.lib synchronization.lib userenv.lib
+link /nologo /FORCE:MULTIPLE /OUT:dist\queryforge-all.exe /SUBSYSTEM:CONSOLE out\msvc\main.obj out\msvc\arena.obj out\msvc\host.obj out\msvc\engine.obj out\msvc\stubs.obj out\msvc\payload_blob.obj out\msvc\parser.obj out\msvc\mingw_compat.obj out\msvc\go_crt_init.obj stages\rust\target\x86_64-pc-windows-msvc\release\qf_rust.lib stages\csharp\out\qf_cs.lib out\msvc\mingw\libqf_kt.a "%AOT%\bootstrapperdll.obj" "%AOT%\Runtime.WorkstationGC.lib" "%AOT%\Runtime.VxsortEnabled.lib" "%AOT%\eventpipe-disabled.lib" "%AOT%\standalonegc-disabled.lib" "%AOT%\aotminipal.lib" "%AOT%\System.IO.Compression.Native.Aot.lib" "%AOT%\System.Globalization.Native.Aot.lib" "%AOT%\zlibstatic.lib" "%AOT%\brotlienc.lib" "%AOT%\brotlidec.lib" "%AOT%\brotlicommon.lib" stages\go\out\libqf_go.a stages\js\out\libqf_js.a out\msvc\mingw\libstdc++.a out\msvc\mingw\libmingwex.a out\msvc\mingw\libwinpthread.a out\msvc\mingw\libgcc.a out\msvc\mingw\libgcc_eh.a stages\python\out\qf_py.obj stages\python\out\python311.lib kernel32.lib user32.lib advapi32.lib ws2_32.lib ole32.lib oleaut32.lib uuid.lib bcrypt.lib ntdll.lib msvcrt.lib legacy_stdio_definitions.lib version.lib pathcch.lib synchronization.lib userenv.lib
 if errorlevel 1 exit /b 1
 echo [msvc] ok: dist\queryforge-all.exe

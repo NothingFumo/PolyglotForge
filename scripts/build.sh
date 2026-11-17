@@ -37,6 +37,10 @@ CXX="$(pick "$(command -v g++ 2>/dev/null || true)" /mnt/c/Strawberry/c/bin/g++.
 RUN="$(pick "$(command -v bun 2>/dev/null || true)" "$(command -v node 2>/dev/null || true)" \
             /mnt/c/Users/Lenovo/.bun/bin/bun.exe /c/Users/Lenovo/.bun/bin/bun.exe \
             /mnt/d/nodejs/node.exe /d/nodejs/node.exe)" || { echo "找不到 bun 或 node" >&2; exit 1; }
+PY="$(pick "$(command -v python 2>/dev/null || true)" "$(command -v python3 2>/dev/null || true)" \
+           /mnt/d/Python/Python311/python.exe /d/Python/Python311/python.exe)" || PY=""
+LD="$(dirname "$CC")/ld.exe"
+[ -x "$LD" ] || LD="$(command -v ld 2>/dev/null || echo ld)"
 
 mkdir -p out dist
 rm -f out/stage-*.ok
@@ -192,6 +196,15 @@ prepare_msvc_side() {
         repack python311 stages/python/out/python311.lib || return 1
         P_LIBS+=("$MSVC_DIR/libs/python311.a")
         P_LIBS_EXTRA+=(-lucrtbase -lpathcch -lversion)
+
+        # 标准库载荷：Lib/ → zip → 作为二进制对象链入（qf_py.c 负责首次运行时释放）。
+        if [ -n "$PY" ]; then
+            [ -f out/payload/lib.zip ] || "$PY" scripts/make_payload.py
+            ( cd out && "$LD" -r -b binary payload/lib.zip -o payload_blob.o )
+            P_SRC+=(out/payload_blob.o)
+        else
+            echo "[warn] 找不到 python，跳过标准库载荷" >&2
+        fi
     fi
 
     # MSVC 归档里有大量 COMDAT 定义的重复副本（/Gy 让每个函数一节），

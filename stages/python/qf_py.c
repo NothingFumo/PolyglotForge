@@ -23,6 +23,80 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef QF_HAVE_PY_PAYLOAD
+#include <direct.h>
+#include <windows.h>
+
+/* ld -r -b binary 对 out/payload/lib.zip 生成的符号。 */
+extern const unsigned char _binary_payload_lib_zip_start[];
+extern const unsigned char _binary_payload_lib_zip_end[];
+
+static uint64_t fnv1a(const unsigned char* p, size_t n) {
+    uint64_t h = 1469598103934665603ULL;
+    for (size_t i = 0; i < n; ++i) {
+        h ^= p[i];
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+static int file_has_size(const char* path, long long want) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return 0;
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return 0;
+    }
+    long long sz = _ftelli64(f);
+    fclose(f);
+    return sz == want;
+}
+
+/*
+ * 把内嵌的标准库 zip 落到 %LOCALAPPDATA%\PolyglotForge\payload\<hash>\lib.zip。
+ * 返回 1 表示路径可用（写入 out，UTF-8，NUL 结尾）。
+ * 以"内容指纹 + 长度"做目录名：换构建即换目录，避免读到旧标准库。
+ */
+static int payload_materialize(char* out, size_t cap) {
+    const unsigned char* data = _binary_payload_lib_zip_start;
+    const size_t size = (size_t)(_binary_payload_lib_zip_end - _binary_payload_lib_zip_start);
+    if (size == 0) return 0;
+
+    const char* base = getenv("LOCALAPPDATA");
+    if (!base || !base[0]) return 0;
+
+    uint64_t h = fnv1a(data, size < 4096 ? size : 4096) ^ (uint64_t)size;
+    char dir[1024];
+    int n = snprintf(dir, sizeof dir, "%s\\PolyglotForge\\payload\\%016llx",
+                     base, (unsigned long long)h);
+    if (n <= 0 || (size_t)n >= sizeof dir) return 0;
+
+    char tmp[1024];
+    snprintf(tmp, sizeof tmp, "%s", dir);
+    for (char* p = tmp; *p; ++p) {
+        if (*p == '\\') {
+            *p = '\0';
+            _mkdir(tmp);
+            *p = '\\';
+        }
+    }
+    _mkdir(tmp);
+
+    snprintf(out, cap, "%s\\lib.zip", dir);
+    if (file_has_size(out, (long long)size)) return 1;
+
+    FILE* f = fopen(out, "wb");
+    if (!f) return 0;
+    size_t wrote = fwrite(data, 1, size, f);
+    fclose(f);
+    if (wrote != size) {
+        remove(out);
+        return 0;
+    }
+    return 1;
+}
+#endif
+
 /* 解释器与插件状态。UDF 求值在单进程内共享一个解释器。 */
 static int g_initialized;
 static int g_loaded;
@@ -134,6 +208,8 @@ static qf_err py_start(const qf_host* host, qf_diag* diag) {
     cfg.user_site_directory = 0;
     cfg.install_signal_handlers = 0;
     cfg.write_bytecode = 0;
+    /* 标准库来自内嵌 zip，getpath 找不到 PREFIX 属预期，不要再刷警告。 */
+    cfg.pathconfig_warnings = 0;
 
     char msg[512];
     msg[0] = '\0';
@@ -150,6 +226,23 @@ static qf_err py_start(const qf_host* host, qf_diag* diag) {
             st = PyConfig_SetBytesString(&cfg, &cfg.home, home);
         }
     }
+#ifdef QF_HAVE_PY_PAYLOAD
+    /*
+     * 标准库随 exe 内嵌：释放到本地缓存后，直接把 lib.zip 挂到模块搜索路径。
+     * zipimport 原生支持 zip，不需要解压；显式设置搜索路径后，
+     * getpath 不再按 exe 位置猜测 PREFIX，也就不会打印 <prefix> 警告。
+     */
+    if (!PyStatus_Exception(st)) {
+        char zip_path[1024];
+        wchar_t wpath[1024];
+        if (payload_materialize(zip_path, sizeof zip_path) &&
+            MultiByteToWideChar(CP_UTF8, 0, zip_path, -1, wpath, 1024) > 0) {
+            cfg.module_search_paths_set = 1;
+            PyStatus ast = PyWideStringList_Append(&cfg.module_search_paths, wpath);
+            if (PyStatus_Exception(ast)) st = ast;
+        }
+    }
+#endif
     if (!PyStatus_Exception(st)) st = Py_InitializeFromConfig(&cfg);
     if (PyStatus_Exception(st)) {
         const char* err = st.err_msg ? st.err_msg : "解释器初始化失败";
