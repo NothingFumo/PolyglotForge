@@ -86,3 +86,100 @@ C++ 依赖全部由 MinGW 的 `libstdc++.a` + `libgcc_eh.a`（同样过一遍 `c
 - **MSVC 装配器是第二条可运行的验收路径**，也是唯一同时含 C# 与 CPython 的装配体；
 - Go 不需要换实现（TinyGo 等替代方案未采用）：挂起是初始化表约定不同，不是 Go 运行时不兼容；
 - Kotlin/Native 归档可以被 link.exe 消费，代价是链接前必须过一遍 COFF 归一化。
+
+## 追加（2026-11）：gcc 主干也链入了 C# 与 CPython（九阶段同链，e2e 6/6）
+
+`bash scripts/build.sh`（不带 `--skip`、不再需要 `--link-msvc`）现在直接产出
+`dist/queryforge.exe`：C / C++ / Rust / Go / C# / Kotlin / CPython / JS 九个阶段在同一个
+MinGW 链接里，`bash tests/e2e/run.sh ./dist/queryforge.exe` 6/6。
+
+关键结论：**卡住 gcc 主干的第一因不是“缺哪些符号”，而是 ld 处理 MSVC 归档时的 COMDAT 语义**
+（与上一节 link.exe 侧的 LNK1143 是同一类问题的镜像）。剥掉这一层之后，剩余缺口只有
+C++ 运算符名、`std::nothrow` 常量、`__chkstk`、`__isa_available`、`__tls_guard` 与两套 WinAPI 导入，
+全部可以精确补齐。
+
+### 1. 归一化：MSVC 归档 → 普通 COFF 对象（`stages/stubs/coff_repack.py`）
+
+三次实测都指向同一件事：
+
+1. **从归档里取成员会丢定义**。`ld -r --whole-archive Runtime.WorkstationGC.lib` 直接报
+   `BFD: ...: error: unexpected symbol '.text$mn' in COMDAT section`；正常链接时
+   `?SetFree@CObjectHeader@WKS@@QEAAX_K@Z` 明明定义在 `gcwks.cpp.obj` 里、引用也在同一个目标里，
+   仍然 `undefined reference`；把该 `.obj` 当**普通文件**传给 ld 就正常（`--trace-symbol` 能看到
+   `definition of ...`）。于是先解包成员再链接。
+2. **COMDAT 标志本身要清掉**。留着 `IMAGE_SCN_LNK_COMDAT` 时，ld 按节名去重（MSVC `/Gy` 让每个
+   函数都叫 `.text$mn`），定义成批丢失；清掉后 `?SetFree…`、`?uoh_alloc_set…`、
+   `?IsValidSegmentSize…`、`?GetNumPointers…`、vxsort 的 `smallsort` 系列一并解析。重复副本交给
+   `-Wl,--allow-multiple-definition`（COMDAT 本来就是同码多份，取先出现者等价）。
+3. **同一个根因制造了 CPython 的“假缺口”**：`printf / sprintf / fprintf / vfprintf / swprintf`
+   其实由 `python311.lib` 自己定义（该库 51422 处 COMDAT），归一化后不再需要外部 CRT 提供；
+   `_Py_atomic_load_64bit_impl` 同样如此，**不需要任何转发 shim**。实测：C# 侧只链
+   `WorkstationGC` + `aotminipal` 时是 179 个未定义符号，补齐其余 AOT 库并归一化后归零；
+   CPython 侧归一化后只剩 PathCch 与 version 两组 WinAPI 导入。
+
+拆出的对象用 `ar rcs` 重新打包成 GNU 归档，链接时用 `--start-group` 处理互引。
+
+### 2. C++ ABI：objcopy 改名，而不是 .def / --defsym
+
+两条“标准”候选路径实测都不可用：
+
+- `-Wl,--defsym,'??_V@YAXPEAX@Z=qf_msvc_delete_array'` → `ld: --defsym:1: syntax error`
+  （`?` / `@` 不是 defsym 表达式的合法字符；`a?b=c`、`a@b=c` 同样报错）；
+- `-Wl,x.def` 里写 `EXPORTS ??_V@YAXPEAX@Z=qf_msvc_delete_array` 只生成导出表，
+  **不产生内部符号定义**，引用照样 undefined。
+
+最终方案：`stages/stubs/msvcpp_shim.c` 用 malloc/free 实现 new/delete 与 `std::nothrow` 常量，
+编译后 `objcopy --redefine-sym 实现名=修饰名` 改名。覆盖的修饰名：
+`??_V@YAXPEAX@Z`、`??_V@YAXPEAX_K@Z`、`??_U@YAPEAX_K@Z`、
+`??_U@YAPEAX_KAEBUnothrow_t@std@@@Z`、`??2@YAPEAX_K@Z`、`??2@YAPEAX_KAEBUnothrow_t@std@@@Z`、
+`??3@YAXPEAX@Z`、`??3@YAXPEAX_K@Z`、`?nothrow@std@@3Unothrow_t@1@B`。
+跨边界不传 C++ 对象，所以 malloc/free 语义足够；注意 `--redefine-sym` 的方向是「旧名=新名」。
+
+### 3. NativeAOT 运行时初始化：`bootstrapperdll.obj`
+
+只链 `qf_cs.lib` 能通过链接，但第一次调用 `qf_cs_compile` 就在
+`RuntimeInstance::GetThreadStore` 访问违例（gdb 回溯：`qf_cs_compile →
+RhpReversePInvokeAttachOrTrapThread2 → ThreadStore::AttachCurrentThread → RuntimeInstance::GetThreadStore`）
+——托管运行时没有启动。`bootstrapperdll.obj` 的 `.CRT$XCU` 项就是 `InitializeRuntime()`，加上即恢复
+（`WHERE age > 25` → 4 行）。exe 场景的 `bootstrapper.obj` 会引入 `__managed__Main`，静态库使用者不能链。
+
+### 4. TLS：`.CRT$XDU` 改名 + 关掉基址重定位
+
+两处独立故障，都表现为 TLS 指针是野值：
+
+- **初始化时机**：`thread.cpp.obj` 把 `?t_random@ee_alloc_context` 的动态初始化器放在
+  **`.CRT$XDU`**；MinGW 的 `__dyn_tls_init` 在 TLS 数组就绪之前就遍历这个列表，于是
+  `minipal_xoshiro128pp_init` 拿到野指针（gdb：`rcx=0x89b26e08`，而 `[gs:0x58][0]` 当时还不是本模块
+  的 TLS 块）。归一化时把它改名成 `.CRT$XCU`，改由 `_initterm` 在 TLS 就绪之后执行
+  （代价：该初始化器只在主线程跑一次）。
+- **基址重定位污染 SECREL 立即数**：MSVC 的 TLS 访问形如 `mov ecx, SECREL(sym)` +
+  `add [gs:0x58][_tls_index*8], rcx`。ld 把这个 4 字节立即数也登记成基址重定位，加载时被加上
+  镜像基址偏移——实测指令从 `mov ecx, 0xa98` 变成 `mov ecx, 0xf9dd0a98`，于是野指针。
+  `-Wl,--disable-dynamicbase` 去掉重定位表即可（本 exe 固定在 0x140000000，不需要 ASLR）。
+- `__tls_guard`（定义在 `.tls$` 节，偏移落在本模块 TLS 块内，读到的恒为 0）与
+  `__dyn_tls_on_demand_init`（空实现，MSVC 侧唯一的动态初始化器已被上面改名带走）由
+  `msvcpp_shim.c` 提供。
+
+### 5. 最后 9 个符号的补法
+
+| 符号 | 补法 | 证据 |
+| --- | --- | --- |
+| `__chkstk` | 优先链 MSVC 的 `chkstk.obj`；找不到时 `-Wl,--defsym,__chkstk=___chkstk_ms`（两者同为“RAX=帧大小、逐页触碰保护页”） | 两条分支都跑通 e2e |
+| `__isa_available` | `msvcpp_shim.c` 里 `int __isa_available = 0`（MSVC 基线 X86 档，CPython/STL 的 lzcnt/popcnt 快路径退到通用实现） | 目标文件以 `/alternatename:__isa_available=__isa_available_default` 引用，ld 不认该指令，必须显式定义 |
+| `__imp_PathCchSkipRoot` / `CombineEx` / `FindExtension` | `-lpathcch` | MinGW 自带 import lib（`T PathCchSkipRoot` + `I __imp_PathCchSkipRoot`） |
+| `VerQueryValueW` / `GetFileVersionInfoW` / `GetFileVersionInfoSizeW` | `-lversion` | 同上 |
+| `__imp___stdio_common_vsprintf` 等 UCRT 内部入口 | `-lucrtbase` | MinGW 的 ucrtbase import lib 里是 `__stdio_common_v*` 一族 |
+| `WaitOnAddress` / `WakeByAddressSingle`、`GetUserProfileDirectoryW` | `-lsynchronization` / `-luserenv` | 与 Rust 阶段同一组库 |
+
+### 6. 验收与已知代价
+
+- `bash scripts/build.sh` → `dist/queryforge.exe` 29.5 MB；`tests/e2e/run.sh` **6/6**。
+- 三条链路各自有独立证据：`WHERE age > 25` 在 `qf_cs_eval` 上命中 gdb 断点（C# 编译谓词）；
+  `--where "row.c2 > 25"` 在 `qf_js_where` 上命中（JS 沙箱的列名是 `c0..cN`，`row.age` 会报
+  「未知列：age」）；`--plugin stages/python/fixtures/score.py` + `select score(age) as s from t`
+  输出 `60 / 40 / 70 / 82 / 56`（空值行留空）。
+- 代价：`--disable-dynamicbase`（无 ASLR）、`--allow-multiple-definition`（COMDAT 重复副本取先出现者）、
+  MSVC 的 TLS 动态初始化器只在主线程执行一次、链接期成片的
+  `Warning: corrupt .drectve at end of def file` 是 MSVC `/DEFAULTLIB` 指令的噪声（无害）。
+- 上一节「MSVC 装配器是唯一同时含 C# 与 CPython 的装配体」因此不再成立：gcc 主干同样九阶段同链，
+  两条装配路径共用同一套 e2e。
