@@ -28,7 +28,7 @@ const cLayout = `
 #define QF_ABI_VERSION ${ABI_VERSION}
 
 typedef int32_t qf_err;
-${enumC('QF', ERR)}
+${enumC('QF_ERR', ERR)}
 
 typedef int32_t qf_type;
 ${Object.entries(TYPE).map(([k, v]) => `enum { QF_T_${k} = ${v} };`).join('\n')}
