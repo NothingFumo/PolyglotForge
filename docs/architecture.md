@@ -39,6 +39,8 @@ flowchart TD
 | python | Python | UDF 插件热加载（静态 CPython） | `qf_py.obj` | `stages/python/test.sh` |
 | javascript | JS | 结果表格渲染与 `--where` 沙箱 | `libqf_js.a` | `stages/js/test.sh` |
 
+> 链接状态：C / C++ / Rust / Go / JS 已进入默认链接；Kotlin 开发中；C# 与 Python 产物可独立构建并通过自测，但因 MSVC/MinGW CRT 边界未参与默认链接，见 `docs/adr/0007-msvc-static-libs-not-default-linked.md`。
+
 ## 所有权与生命周期
 
 - **arena 独占**：所有跨语言分配都经 `qf_host.alloc`；没有任何语言持有自己的长期内存。查询结束由宿主一次性释放。

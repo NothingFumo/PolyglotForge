@@ -2,6 +2,27 @@
 
 多语言混合编译学习项目：九种语言各自实现查询引擎的一部分，最终静态链接为**一个** `queryforge.exe`。
 
+## 当前状态
+
+| 阶段 | 状态 |
+|---|---|
+| TypeScript | 已接入（构建期 schema/codegen） |
+| C / C++ / Rust / Go / JavaScript | **已静态链接进 `dist/queryforge.exe`**，端到端 6/6 与 sqlite3 逐字节一致 |
+| Python | 静态 CPython（33 MB）与 UDF 自测通过；因 MSVC/MinGW CRT 边界未入默认链接（见 ADR 0007） |
+| C# | NativeAOT 静态库与谓词自测通过；同上 |
+| Kotlin | 阶段开发中（Kotlin/Native 工具链获取受阻） |
+
+```console
+$ ./dist/queryforge.exe tests/e2e/data/users.csv \
+    "select city as city, count(*) as n from t group by city order by n desc, city asc"
+city  n
+----  -
+BJ    2
+SH    2
+SZ    2
+(3 rows)
+```
+
 ## 目录
 
 | 路径 | 内容 |
