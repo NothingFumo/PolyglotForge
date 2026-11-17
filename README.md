@@ -46,6 +46,18 @@ $ ./dist/queryforge-all.exe tests/e2e/data/users.csv \
 | `tests/e2e/` | 端到端验收（含 sqlite3 对照） |
 | `scripts/build.sh` | 构建与装配脚本 |
 
+## 静态链接边界
+
+九种语言的**代码**全部以归档形式链进同一个映像，运行时不加载任何语言运行时
+（无 `python311.dll`、无 .NET、无 JVM、无 node）。但 CRT 仍按工具链动态链接：
+
+| 产物 | 仍然动态依赖 | 原因 |
+|---|---|---|
+| `queryforge.exe`（gcc） | `libstdc++-6.dll`、`ucrtbase.dll` + api-set | Kotlin/Native 归档引用 libstdc++ 的 RTTI vtable（`__class_type_info`），静态化即 `undefined reference`；`libgcc` 与 `winpthread` 已静态化 |
+| `queryforge-all.exe`（MSVC） | `VCRUNTIME140.dll`、`VCRUNTIME140_1.dll`、`ucrtbase.dll` | NativeAOT 与 CPython 都以 `/MD` 构建 |
+
+Python 标准库目前仍来自系统安装，属于 ADR 0001 里尚未落地的载荷。
+
 ## 构建
 
 ```bash
