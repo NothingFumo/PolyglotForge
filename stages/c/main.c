@@ -9,6 +9,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 qf_host qf_host_make(qf_arena* a);
 
 static const char* err_name(qf_err e) {
@@ -212,6 +217,10 @@ static void usage(void) {
 }
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    /* 输出必须与对照实现逐字节一致：文本模式下 \n 会被翻译成 \r\n。 */
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
     if (argc < 2) {
         usage();
         return 64;
