@@ -26,6 +26,7 @@
 #ifdef QF_HAVE_PY_PAYLOAD
 #include <direct.h>
 #include <windows.h>
+#include "out/zip_finder_src.h"
 
 /* ld -r -b binary 对 out/payload/lib.zip 生成的符号。 */
 extern const unsigned char _binary_payload_lib_zip_start[];
@@ -236,21 +237,7 @@ static qf_err py_start(const qf_host* host, qf_diag* diag) {
         }
     }
 #ifdef QF_HAVE_PY_PAYLOAD
-    /*
-     * 标准库随 exe 内嵌：释放到本地缓存后，直接把 lib.zip 挂到模块搜索路径。
-     * zipimport 原生支持 zip，不需要解压；显式设置搜索路径后，
-     * getpath 不再按 exe 位置猜测 PREFIX，也就不会打印 <prefix> 警告。
-     */
-    if (!PyStatus_Exception(st)) {
-        char zip_path[1024];
-        wchar_t wpath[1024];
-        if (payload_materialize(zip_path, sizeof zip_path) &&
-            MultiByteToWideChar(CP_UTF8, 0, zip_path, -1, wpath, 1024) > 0) {
-            cfg.module_search_paths_set = 1;
-            PyStatus ast = PyWideStringList_Append(&cfg.module_search_paths, wpath);
-            if (PyStatus_Exception(ast)) st = ast;
-        }
-    }
+    /* 零落盘：不设置 module_search_paths，标准库由内嵌 zip + 内存 finder 提供。 */
 #endif
     if (!PyStatus_Exception(st)) st = Py_InitializeFromConfig(&cfg);
     if (PyStatus_Exception(st)) {
@@ -264,6 +251,29 @@ static qf_err py_start(const qf_host* host, qf_diag* diag) {
         return QF_ERR_EXEC;
     }
     g_initialized = 1;
+
+#ifdef QF_HAVE_PY_PAYLOAD
+    /*
+     * 把内嵌 zip 交给内存 finder：不落盘、不设搜索路径。
+     * finder 只用内建模块（sys/_struct/zlib），所以此时不需要标准库。
+     */
+    {
+        const unsigned char* zb = _binary_payload_lib_zip_start;
+        const size_t zn = (size_t)(_binary_payload_lib_zip_end - _binary_payload_lib_zip_start);
+        PyObject* bytes = PyBytes_FromStringAndSize((const char*)zb, (Py_ssize_t)zn);
+        PyObject* builtins = PyEval_GetBuiltins();
+        if (bytes && builtins) {
+            PyDict_SetItemString(builtins, "__qf_zip__", bytes);
+        }
+        Py_XDECREF(bytes);
+        if (PyRun_SimpleString(qf_zip_finder_src) != 0) {
+            PyErr_Clear();
+            set_diag(host, diag, QF_ERR_EXEC, "Python 标准库导入器初始化失败",
+                     "内嵌 zip 无法安装为 meta_path finder");
+            return QF_ERR_EXEC;
+        }
+    }
+#endif
     return QF_ERR_OK;
 }
 

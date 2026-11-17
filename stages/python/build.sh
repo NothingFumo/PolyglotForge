@@ -19,6 +19,14 @@ vendor="$stage/vendor/Python-3.11.9"
 [ -f "$vendor/PC/pyconfig.h" ] || die "缺少 PC/pyconfig.h（检查 vendor 是否完整）"
 
 echo "[python] 编译 qf_py.c"
+PYEXE="${PYEXE:-}"
+if [ -z "$PYEXE" ]; then
+    for c in python python3 "D:/Python/Python311/python.exe" /d/Python/Python311/python.exe /mnt/d/Python/Python311/python.exe; do
+        if command -v "$c" >/dev/null 2>&1 || [ -x "$c" ]; then PYEXE="$c"; break; fi
+    done
+fi
+[ -n "$PYEXE" ] || die "找不到 python（生成 zip finder 需要）"
+"$PYEXE" ../../scripts/embed_text.py zip_finder.py out/zip_finder_src.h qf_zip_finder_src || die "无法内嵌 zip finder"
 "$QF_CL" -nologo -c -O2 -MD -W4 -D_CRT_SECURE_NO_WARNINGS -DPy_NO_ENABLE_SHARED -DQF_HAVE_PY_PAYLOAD \
       -Ivendor/Python-3.11.9/Include -Ivendor/Python-3.11.9/PC \
       -I../../gen -I../../contracts \
