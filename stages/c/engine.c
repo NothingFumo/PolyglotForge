@@ -252,11 +252,11 @@ static qf_err row_keep(const qf_engine_ctx* c, const qf_batch* in, const qf_ast*
                        qf_filter_fn filter, void* fctx, uint8_t** out_keep, qf_diag* diag) {
     *out_keep = (uint8_t*)qf_arena_alloc(c->arena, in->rows ? in->rows : 1, 1);
     if (!*out_keep) return QF_ERR_EXEC;
+    if (filter) return filter(fctx, in, *out_keep, diag);
     if (ast->where_root < 0) {
         memset(*out_keep, 1, in->rows ? in->rows : 1);
         return QF_ERR_OK;
     }
-    if (filter) return filter(fctx, in, *out_keep, diag);
     for (uint32_t r = 0; r < in->rows; ++r) {
         qf_value v = eval(c, ast->where_root, &in->values[r * in->cols], diag);
         (*out_keep)[r] = (uint8_t)(v.type == QF_T_INT && v.as.i != 0);
