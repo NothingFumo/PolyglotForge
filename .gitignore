@@ -35,3 +35,5 @@ stages/*/bin/
 stages/*/obj/
 stages/*/target/
 stages/kotlin/build/
+
+.idea/
