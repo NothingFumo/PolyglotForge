@@ -6,7 +6,15 @@
 set -euo pipefail
 
 ALLOW_MISSING=0
-if [ "${1:-}" = "--allow-missing" ]; then ALLOW_MISSING=1; fi
+LINK_MSVC_LIBS=0
+SKIP=""
+for arg in "$@"; do
+    case "$arg" in
+        --allow-missing) ALLOW_MISSING=1 ;;
+        --link-msvc)     LINK_MSVC_LIBS=1 ;;
+        --skip=*)        SKIP="${arg#--skip=}" ;;
+    esac
+done
 
 cd "$(dirname "$0")/.."
 root="$PWD"
@@ -33,6 +41,7 @@ rm -f out/stage-*.ok
 
 # 各阶段自建；成功的打标记，标记决定链接时是否纳入该阶段。
 for s in cpp rust go csharp kotlin python js; do
+    case ",$SKIP," in *",$s,"*) echo "[skip] $s"; continue ;; esac
     [ -x "stages/$s/build.sh" ] || continue
     echo "[build] $s"
     if bash "stages/$s/build.sh"; then
@@ -53,21 +62,23 @@ if [ -f out/stage-cpp.ok ]; then
 fi
 if [ -f out/stage-rust.ok ]; then
     SRC+=("stages/rust/libqf_rust.a"); DEFS+=(-DQF_HAVE_RUST)
+    LIBS+=(-lsynchronization -luserenv)
 fi
 if [ -f out/stage-go.ok ]; then
     SRC+=("stages/go/out/libqf_go.a"); DEFS+=(-DQF_HAVE_GO)
     LIBS+=(-lws2_32 -lwinmm -lntdll)
 fi
-if [ -f out/stage-csharp.ok ]; then
+if [ -f out/stage-csharp.ok ] && [ "$LINK_MSVC_LIBS" = "1" ]; then
     SRC+=("stages/csharp/out/qf_cs.lib"); DEFS+=(-DQF_HAVE_CSHARP)
     LIBS+=(-lole32 -loleaut32 -luuid -lbcrypt)
     AOT=""
-    # 链接器是 Windows 程序，只认盘符路径；探测用 MSYS 路径。
-    if [ -d /mnt/c/Users/Lenovo/.nuget/packages ]; then AOT="C:/Users/Lenovo/.nuget/packages"; fi
-    if [ -z "$AOT" ] && [ -d /c/Users/Lenovo/.nuget/packages ]; then AOT="C:/Users/Lenovo/.nuget/packages"; fi
+    for base in /mnt/c/Users/Lenovo/.nuget/packages /c/Users/Lenovo/.nuget/packages; do
+        if [ -d "$base" ]; then AOT="$base"; break; fi
+    done
     if [ -n "$AOT" ]; then
-        NATIVE="$(ls -d "$AOT"/microsoft.netcore.app.runtime.nativeaot.win-x64/*/runtimes/win-x64/native 2>/dev/null | tail -1)"
-        if [ -n "$NATIVE" ]; then
+        NATIVE_MSYS="$(ls -d "$AOT"/microsoft.netcore.app.runtime.nativeaot.win-x64/*/runtimes/win-x64/native 2>/dev/null | tail -1 || true)"
+        if [ -n "$NATIVE_MSYS" ]; then
+            NATIVE="$(winpath "$NATIVE_MSYS")"
             SRC+=("$NATIVE/Runtime.WorkstationGC.lib" "$NATIVE/aotminipal.lib")
         fi
     fi
@@ -75,19 +86,23 @@ fi
 if [ -f out/stage-kotlin.ok ]; then
     SRC+=("stages/kotlin/build/libqf_kt.a"); DEFS+=(-DQF_HAVE_KOTLIN)
 fi
-if [ -f out/stage-python.ok ]; then
+if [ -f out/stage-python.ok ] && [ "$LINK_MSVC_LIBS" = "1" ]; then
     SRC+=("stages/python/out/qf_py.obj" "stages/python/out/python311.lib")
     DEFS+=(-DQF_HAVE_PYTHON)
+    LIBS+=(-lucrtbase)
 fi
 if [ -f out/stage-js.ok ]; then
     SRC+=("stages/js/out/libqf_js.a"); DEFS+=(-DQF_HAVE_JAVASCRIPT)
 fi
 
 SRC+=(stages/stubs/stubs.c)
+if [ "$LINK_MSVC_LIBS" = "1" ] && { [ -f out/stage-csharp.ok ] || [ -f out/stage-python.ok ]; }; then
+    SRC+=(stages/stubs/msvcrt_compat.c)
+fi
 
 echo "[link] ${#SRC[@]} 个目标"
 LINK_LIBS=()
-[ "$USE_CXX" = "1" ] && LINK_LIBS+=(-lstdc++)
+if [ "$USE_CXX" = "1" ]; then LINK_LIBS+=(-lstdc++); fi
 "$CC" -std=c11 -O2 -Wall -Wextra -Igen -Icontracts -Istages/c \
       "${DEFS[@]}" "${SRC[@]}" \
       -o dist/queryforge.exe \

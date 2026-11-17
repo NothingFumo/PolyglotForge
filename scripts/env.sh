@@ -13,3 +13,12 @@ for d in \
   fi
 done
 export PATH
+
+# 把 MSYS 路径转成 Windows 盘符路径：Windows 版链接器/编译器只认后者。
+winpath() {
+    case "$1" in
+        /mnt/[a-z]/*) printf '%s:/%s' "$(echo "${1:5:1}" | tr 'a-z' 'A-Z')" "${1:7}" ;;
+        /[a-z]/*)     printf '%s:/%s' "$(echo "${1:1:1}" | tr 'a-z' 'A-Z')" "${1:3}" ;;
+        *)            printf '%s' "$1" ;;
+    esac
+}
