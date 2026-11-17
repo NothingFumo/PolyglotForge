@@ -46,35 +46,31 @@ $ ./dist/queryforge-all.exe tests/e2e/data/users.csv \
 | `tests/e2e/` | 端到端验收（含 sqlite3 对照） |
 | `scripts/build.sh` | 构建与装配脚本 |
 
-## 静态链接边界
+## 四产物的依赖边界
 
-九种语言的**代码**全部以归档形式链进同一个映像，运行时不加载任何语言运行时
-（无 `python311.dll`、无 .NET、无 JVM、无 node）。但 CRT 仍按工具链动态链接：
+| 产物 | 第三方 DLL | 其余动态依赖 | 打包方式 |
+|---|---|---|---|
+| `queryforge.exe`（gcc 静态） | 无 | `ucrtbase.dll` + `api-ms-win-crt-*`（Windows 自带） | libstdc++/libsupc++/libgcc/winpthread 全静态 |
+| `queryforge-deps.exe`（gcc 动态） | `libstdc++-6.dll`、`libwinpthread-1.dll` | 同上 | 第三方 DLL 不内嵌，由 `build.sh --deps` 复制到 `dist/` |
+| `queryforge-all.exe`（MSVC 动态） | `VCRUNTIME140.dll`、`VCRUNTIME140_1.dll` | 同上 | 由 `msvc-all.bat` 复制到 `dist/` |
+| `queryforge-static-msvc.exe`（MSVC 静态） | 无 | 10 个系统 DLL、11 个导入符号 | `/MT` + `libcmt/libvcruntime/libucrt`，导入表零非系统 DLL |
 
-| 产物 | 仍然动态依赖 | 原因 |
-|---|---|---|
-| `queryforge.exe`（gcc） | `ucrtbase.dll` + `api-ms-win-crt-*`（Windows 自带） | libstdc++/libsupc++/libgcc/winpthread 已全部静态链入 |
-| `queryforge-all.exe`（MSVC） | `VCRUNTIME140.dll`、`VCRUNTIME140_1.dll`、`ucrtbase.dll` | NativeAOT 与 CPython 以 `/MD` 构建 |
+规则与 hello world 一致：**动态格不内嵌第三方运行库，但必须随包；静态格内嵌，且导入表不得出现非系统 DLL。**
+`bash tests/e2e/cells.sh` 会清空 `PATH`（只留 `C:\Windows\system32`）逐个启动四产物来验证这条规则。
 
-gcc 产物的第三方 DLL 依赖已经清零（`objdump -p` 里不再出现 `libstdc++-6.dll` 或
-`libwinpthread-1.dll`），只剩 Windows 自带的 UCRT。MSVC 侧要走 `/MT` 必须
-每个归档都是 `/MT`：Go 的 c-archive 与 Kotlin/Native 的运行时由 MinGW 工具链产出，
-它们调用 `msvcrt.dll`/`ucrtbase.dll`，全静态化会变成"两套 CRT 同映像"，
-比现在的一套动态 CRT 更危险——这是保留 Kotlin 与 Go 的代价。
-
-Python 标准库已作为载荷内嵌：构建期把 `Lib/` 压成 `lib.zip`（排除 test/tkinter），
-以 `ld -r -b binary` 链入，首次运行释放到
-`%LOCALAPPDATA%\PolyglotForge\payload\<内容指纹>\lib.zip` 并挂到
-`module_search_paths`（zipimport 原生支持）。可用探针插件确认：
+Python 标准库作为载荷内嵌，且**不落盘**：构建期把 `Lib/` 压成 `lib.zip`（排除 test/tkinter），
+以 `ld -r -b binary` 链入 `.rdata`；解释器初始化后把这段字节交给内嵌的 zip finder
+（`_struct` 解中央目录 + `zlib` 解压 + `compile`），encodings 则在构建期冻结进
+`Python/frozen.c` 的 `stdlib_modules[]`。运行期不写任何临时文件：
 
 ```console
 $ ./dist/queryforge.exe tests/e2e/data/users.csv \
     "select stdlib_origin(1) as p from t limit 1" --plugin stages/python/fixtures/probe_path.py --raw
 p
-C:\Users\<user>\AppData\Local\PolyglotForge\payload\<hash>\lib.zip\json\__init__.py
+frozen | <builtin>
 ```
 
-因此产物的外部依赖只剩上表的 CRT DLL；本机是否安装 Python 不再影响运行。
+因此产物的外部依赖只剩上表的 DLL；本机是否安装 Python 不再影响运行。
 
 ## 构建
 
