@@ -260,5 +260,23 @@ fi
       "${ARCH_ARGS[@]}" \
       "${LIBS[@]}" -lm
 
+if [ "$DEPS" = "1" ]; then
+    # 动态格：第三方运行库不内嵌进 exe，就必须随包分发到同目录，
+    # 否则在没装 MinGW 的机器上加载器直接 0xC0000135。
+    for dll in libstdc++-6.dll libwinpthread-1.dll; do
+        src="$(dirname "$CC")/$dll"
+        if [ ! -f "$src" ]; then
+            src="$("$CC" -print-file-name="$dll" 2>/dev/null || true)"
+        fi
+        if [ -f "$src" ]; then
+            cp -f "$src" dist/
+            echo "[deps] $dll -> dist/"
+        else
+            echo "[error] 找不到 $dll；动态格将无法在目标机启动" >&2
+            exit 1
+        fi
+    done
+fi
+
 echo "[done] $OUT_EXE"
 "$root/$OUT_EXE" --version
