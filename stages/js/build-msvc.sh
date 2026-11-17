@@ -30,12 +30,12 @@ BAT="$OUT/build-quickjs-msvc.bat"
     printf 'cd /d %s\r\n' "$(printf '%s' "$root" | sed 's|^/mnt/\([a-z]\)/|\U\1:/|; s|^/\([a-z]\)/|\U\1:/|')"
     printf 'set QJ=stages\\js\\vendor\\quickjs\r\n'
     printf 'set OUT=stages\\js\\out\\msvc\r\n'
-    printf 'set DEFS=/D_GNU_SOURCE /DCONFIG_VERSION=\\"%s\\"\r\n' "$QJS_VER"
+    printf 'set DEFS=/D__STDC_NO_ATOMICS__ /DCONFIG_VERSION=\\"%s\\"\r\n' "$QJS_VER"
     printf 'del /q %%OUT%%\\*.obj 2>nul\r\n'
     for f in quickjs cutils dtoa libregexp libunicode; do
-        printf 'cl /nologo /c /O2 /std:c11 %%DEFS%% /I%%QJ%% /Fo%%OUT%%\\%s.obj %%QJ%%\\%s.c\r\n' "$f" "$f"
+        printf 'cl /nologo /c /O2 /std:c11 /MT /D__maybe_unused= %%DEFS%% /I%%QJ%% /Istages/js/vendor/msvc_stubs /Fo%%OUT%%\\%s.obj %%QJ%%\\%s.c\r\n' "$f" "$f"
     done
-    printf 'cl /nologo /c /O2 /std:c11 /Igen /Icontracts /Istages\\js /I%%QJ%% %%DEFS%% /Fo%%OUT%%\\qf_js.obj stages\\js\\qf_js.c\r\n'
+    printf 'cl /nologo /c /O2 /std:c11 /MT /D__maybe_unused= /Igen /Icontracts /Istages\\js /I%%QJ%% /Istages/js/vendor/msvc_stubs %%DEFS%% /Fo%%OUT%%\\qf_js.obj stages\\js\\qf_js.c\r\n'
     printf 'if errorlevel 1 exit /b 1\r\n'
     printf 'lib /nologo /OUT:stages\\js\\out\\qf_js_msvc.lib %%OUT%%\\*.obj\r\n'
     printf 'if errorlevel 1 exit /b 1\r\n'
