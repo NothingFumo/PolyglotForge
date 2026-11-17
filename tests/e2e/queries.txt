@@ -1,0 +1,6 @@
+select name as name, age as age from t where age > 25 order by age desc
+select city as city, count(*) as n from t group by city order by n desc, city asc
+select name as name from t order by name asc limit 3
+select count(*) as n from t
+select sum(age) as s, avg(age) as a from t
+select name as name, age as age from t where city = 'SH' order by age desc
