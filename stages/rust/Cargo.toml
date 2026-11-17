@@ -1,0 +1,17 @@
+[package]
+name = "qf_rust"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "PolyglotForge 语义分析与计划阶段（C ABI 静态库）"
+
+[lib]
+name = "qf_rust"
+crate-type = ["staticlib"]
+
+[profile.release]
+opt-level = 3
+# catch_unwind 必须真正生效：panic=abort 会让 panic 直接终止宿主进程。
+panic = "unwind"
+
+[workspace]
