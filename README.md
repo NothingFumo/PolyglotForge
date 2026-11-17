@@ -12,8 +12,8 @@
 | Go | ✅（`.CRT$XCU` 补运行时初始化） | ✅ |
 | Kotlin | ✅（COFF 归一化后） | ✅ |
 | JavaScript | ✅ QuickJS | ✅ QuickJS |
-| C# | ✅ NativeAOT 静态库 | ✅（`coff_repack` + C++ ABI shim，待复核） |
-| Python | ✅ 静态 CPython | 接入中 |
+| C# | ✅ NativeAOT 静态库 | ✅（`coff_repack` + C++ ABI shim） |
+| Python | ✅ 静态 CPython | ✅（同一套归一化） |
 | TypeScript | 构建期 schema/codegen | 同 |
 
 ```console
@@ -49,9 +49,10 @@ $ ./dist/queryforge-all.exe tests/e2e/data/users.csv \
 ## 构建
 
 ```bash
-bash scripts/build.sh --allow-missing   # 构建可得阶段 → dist/queryforge.exe
-bash tests/e2e/run.sh                   # 端到端验收（sqlite3 对照）
-bash scripts/test-all.sh                # 各语言自测 + 端到端
+bash scripts/build.sh --allow-missing   # gcc 主干 → dist/queryforge.exe
+cmd /c 'scripts\msvc-all.bat'           # MSVC 主干 → dist/queryforge-all.exe
+bash tests/e2e/run.sh ./dist/queryforge.exe 10
+bash tests/e2e/run.sh ./dist/queryforge-all.exe 10
 ```
 
 ## 使用
