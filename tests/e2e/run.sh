@@ -17,16 +17,23 @@ PY="$(pick "$(command -v python 2>/dev/null || true)" "$(command -v python3 2>/d
 
 mkdir -p out/e2e
 BIN="${1:-./dist/queryforge.exe}"
+LIMIT="${2:-}"
 if [ ! -f "$BIN" ]; then
     bash scripts/build.sh
 fi
+
+# 第二个参数给出单条查询超时秒数：混合运行时的装配体可能挂起，
+# 没有超时会让一次 e2e 卡到 300 秒。
+run_bin() {
+    if [ -n "$LIMIT" ]; then timeout "$LIMIT" "$BIN" "$@"; else "$BIN" "$@"; fi
+}
 
 fail=0
 i=0
 while IFS= read -r sql; do
     [ -z "$sql" ] && continue
     i=$((i + 1))
-    if ! "$BIN" tests/e2e/data/users.csv "$sql" --raw \
+    if ! run_bin tests/e2e/data/users.csv "$sql" --raw \
             > "out/e2e/got.$i.tsv" 2> "out/e2e/got.$i.err"; then
         echo "query $i 执行失败: $sql"
         sed -n '1,5p' "out/e2e/got.$i.err"
@@ -42,7 +49,7 @@ while IFS= read -r sql; do
 done < tests/e2e/queries.txt
 
 # 表格渲染（JS 阶段）单独验证：默认输出必须含表头与行数汇总
-if "$BIN" tests/e2e/data/users.csv \
+if run_bin tests/e2e/data/users.csv \
         "select name as name, age as age from t" > out/e2e/table.txt 2> out/e2e/table.err; then
     grep -q "rows" out/e2e/table.txt || { echo "表格输出缺少行数汇总"; fail=1; }
     grep -q "name" out/e2e/table.txt || { echo "表格输出缺少表头"; fail=1; }
