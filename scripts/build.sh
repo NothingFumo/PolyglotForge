@@ -12,12 +12,15 @@ set -euo pipefail
 
 ALLOW_MISSING=0
 SKIP=""
+DEPS=0
 for arg in "$@"; do
     case "$arg" in
         --allow-missing) ALLOW_MISSING=1 ;;
         --skip=*)        SKIP="${arg#--skip=}" ;;
+        --deps)          DEPS=1 ;;
     esac
 done
+if [ "$DEPS" = "1" ]; then OUT_EXE="dist/queryforge-deps.exe"; else OUT_EXE="dist/queryforge.exe"; fi
 
 cd "$(dirname "$0")/.."
 root="$PWD"
@@ -237,8 +240,14 @@ SRC+=(stages/stubs/stubs.c)
 echo "[link] ${#SRC[@]} 个源/对象, ${#ARCHIVES[@]} 个归档 + ${#P_LIBS[@]} 个 MSVC 归档"
 # Kotlin/Native 归档引用 __class_type_info 的 vtable，它由 libsupc++ 提供；
 # 只加 -static-libstdc++ 时驱动不会显式拉 -lsupc++，会断链。这里显式静态链两者。
-if [ "$USE_CXX" = "1" ]; then LIBS+=(-Wl,-Bstatic -lstdc++ -lsupc++ -Wl,-Bdynamic); fi
-LIBS+=(-static-libgcc -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic)
+if [ "$DEPS" = "1" ]; then
+    # 允许第三方 DLL：libstdc++/winpthread 走动态，产物需 2 个 MinGW DLL。
+    if [ "$USE_CXX" = "1" ]; then LIBS+=(-lstdc++); fi
+    LIBS+=(-lwinpthread)
+else
+    if [ "$USE_CXX" = "1" ]; then LIBS+=(-Wl,-Bstatic -lstdc++ -lsupc++ -Wl,-Bdynamic); fi
+    LIBS+=(-static-libgcc -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic)
+fi
 
 ARCH_ARGS=()
 if [ "${#ARCHIVES[@]}" -gt 0 ] || [ "${#P_LIBS[@]}" -gt 0 ]; then
@@ -247,9 +256,9 @@ fi
 
 "$CC" -std=c11 -O2 -Wall -Wextra -Igen -Icontracts -Istages/c \
       "${LINK_FLAGS[@]}" "${DEFS[@]}" "${SRC[@]}" "${P_OBJS[@]}" \
-      -o dist/queryforge.exe \
+      -o "$OUT_EXE" \
       "${ARCH_ARGS[@]}" \
       "${LIBS[@]}" -lm
 
-echo "[done] dist/queryforge.exe"
-"$root/dist/queryforge.exe" --version
+echo "[done] $OUT_EXE"
+"$root/$OUT_EXE" --version
