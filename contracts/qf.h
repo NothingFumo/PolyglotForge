@@ -55,6 +55,10 @@ typedef struct qf_ast {
     int32_t* select;
     uint32_t select_count;
 
+    /* 与 select 等长：第 i 项的输出列名（AS 别名），无别名时为空串。
+       不使用 qf_node.name 承载别名，否则会覆盖列名与 UDF 名。 */
+    qf_str*  select_names;
+
     qf_str   from_table;
     int32_t  where_root; /* -1 表示无 */
 

@@ -6,7 +6,7 @@ namespace Qf;
 
 public static class Abi
 {
-    public const int Version = 1;
+    public const int Version = 2;
 }
 
 public enum QfErr : int

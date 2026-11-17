@@ -28,7 +28,7 @@ class QfNode(ctypes.Structure):
     ]
 
 
-ABI_VERSION = 1
+ABI_VERSION = 2
 QF_OK = 0
 QF_ERR_PARSE = 3
 QF_ERR_TYPE = 4
