@@ -53,8 +53,14 @@ $ ./dist/queryforge-all.exe tests/e2e/data/users.csv \
 
 | 产物 | 仍然动态依赖 | 原因 |
 |---|---|---|
-| `queryforge.exe`（gcc） | `libstdc++-6.dll`、`ucrtbase.dll` + api-set | Kotlin/Native 归档引用 libstdc++ 的 RTTI vtable（`__class_type_info`），静态化即 `undefined reference`；`libgcc` 与 `winpthread` 已静态化 |
-| `queryforge-all.exe`（MSVC） | `VCRUNTIME140.dll`、`VCRUNTIME140_1.dll`、`ucrtbase.dll` | NativeAOT 与 CPython 都以 `/MD` 构建 |
+| `queryforge.exe`（gcc） | `ucrtbase.dll` + `api-ms-win-crt-*`（Windows 自带） | libstdc++/libsupc++/libgcc/winpthread 已全部静态链入 |
+| `queryforge-all.exe`（MSVC） | `VCRUNTIME140.dll`、`VCRUNTIME140_1.dll`、`ucrtbase.dll` | NativeAOT 与 CPython 以 `/MD` 构建 |
+
+gcc 产物的第三方 DLL 依赖已经清零（`objdump -p` 里不再出现 `libstdc++-6.dll` 或
+`libwinpthread-1.dll`），只剩 Windows 自带的 UCRT。MSVC 侧要走 `/MT` 必须
+每个归档都是 `/MT`：Go 的 c-archive 与 Kotlin/Native 的运行时由 MinGW 工具链产出，
+它们调用 `msvcrt.dll`/`ucrtbase.dll`，全静态化会变成"两套 CRT 同映像"，
+比现在的一套动态 CRT 更危险——这是保留 Kotlin 与 Go 的代价。
 
 Python 标准库已作为载荷内嵌：构建期把 `Lib/` 压成 `lib.zip`（排除 test/tkinter），
 以 `ld -r -b binary` 链入，首次运行释放到
