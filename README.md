@@ -17,7 +17,18 @@
 
 ```bash
 bash scripts/build.sh          # 全量构建 → dist/queryforge.exe
-bash tests/e2e/run.sh          # 端到端验收
+bash tests/e2e/run.sh          # 端到端验收（sqlite3 对照）
+```
+
+## 使用
+
+```bash
+./dist/queryforge.exe data/users.csv "select name, age from t where age > 30 order by age desc"
+./dist/queryforge.exe data/users.csv "select city, count(*) as n from t group by city order by n desc" --explain
+./dist/queryforge.exe data/users.csv "select name from t" --where "row.age > 30"   # JS 沙箱过滤
+./dist/queryforge.exe data/users.csv "select score(name) from t" --plugin score.py # Python UDF
+./dist/queryforge.exe data/users.csv --dsl 'from(users) { select("name"); limit(2) }'  # Kotlin DSL
+./dist/queryforge.exe data/users.csv "select name from t" --batch "select count(*) from t;select name from t limit 1"
 ```
 
 ## 决策记录
