@@ -235,11 +235,9 @@ fi
 SRC+=(stages/stubs/stubs.c)
 
 echo "[link] ${#SRC[@]} 个源/对象, ${#ARCHIVES[@]} 个归档 + ${#P_LIBS[@]} 个 MSVC 归档"
-# Kotlin/Native 的归档引用 libstdc++ 的 RTTI vtable（__class_type_info），
-# 只有共享 libstdc++ 才提供，静态化会断链：实测 `-static-libstdc++` 报
-# `vtable for __cxxabiv1::__class_type_info` undefined。因此 libstdc++ 保持动态，
-# 仅把 winpthread（QuickJS 需要）与 libgcc 静态化。
-if [ "$USE_CXX" = "1" ]; then LIBS+=(-lstdc++); fi
+# Kotlin/Native 归档引用 __class_type_info 的 vtable，它由 libsupc++ 提供；
+# 只加 -static-libstdc++ 时驱动不会显式拉 -lsupc++，会断链。这里显式静态链两者。
+if [ "$USE_CXX" = "1" ]; then LIBS+=(-Wl,-Bstatic -lstdc++ -lsupc++ -Wl,-Bdynamic); fi
 LIBS+=(-static-libgcc -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic)
 
 ARCH_ARGS=()
