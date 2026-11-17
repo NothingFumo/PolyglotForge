@@ -7,6 +7,8 @@
 
 #include <string.h>
 
+/* 九个阶段全就位时这个函数没有调用者（所有占位实现都被 QF_HAVE_* 排除了）。 */
+__attribute__((unused))
 static qf_err unsupported(qf_diag* diag, const char* what, uint32_t len) {
     if (diag) {
         uint32_t n = (uint32_t)strlen(what);
