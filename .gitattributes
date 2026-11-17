@@ -10,6 +10,7 @@
 *.ts   text eol=lf
 *.js   text eol=lf
 *.sh   text eol=lf
+*.bat  text eol=crlf
 *.csv  text eol=lf
 *.md   text eol=lf
 *.lib  binary

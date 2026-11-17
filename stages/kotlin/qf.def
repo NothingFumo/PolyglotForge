@@ -1,0 +1,6 @@
+# cinterop 定义：把 contracts/qf.h（含 gen/qf_layout.h）暴露给 Kotlin。
+# 路径相对于仓库根，build.sh 会先 cd 到仓库根再调用 cinterop。
+# 只暴露 qf.h 及其递归包含的 qf_layout.h，不引入其它头。
+headers = qf.h
+compilerOpts = -Icontracts -Igen
+package = qf.c
