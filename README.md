@@ -37,8 +37,9 @@ SZ    2
 ## 构建
 
 ```bash
-bash scripts/build.sh          # 全量构建 → dist/queryforge.exe
-bash tests/e2e/run.sh          # 端到端验收（sqlite3 对照）
+bash scripts/build.sh --allow-missing   # 构建可得阶段 → dist/queryforge.exe
+bash tests/e2e/run.sh                   # 端到端验收（sqlite3 对照）
+bash scripts/test-all.sh                # 各语言自测 + 端到端
 ```
 
 ## 使用
