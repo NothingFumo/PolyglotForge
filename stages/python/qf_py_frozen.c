@@ -252,10 +252,11 @@ static const struct _frozen qf_frozen_table[] = {
     {0, 0, 0},
 };
 
-/* 把冻结表接到解释器的默认表后面：默认表里是 importlib/io/os 等引导模块，
-   丢掉它们解释器起不来。 */
+/* import 机制读的是分类指针（_PyImport_FrozenStdlib 等），
+   PyImport_FrozenModules 默认 NULL；因此把扩展追加到 stdlib 指针上。 */
 void qf_py_install_frozen(void) {
-    const struct _frozen* base = PyImport_FrozenModules;
+    extern const struct _frozen* _PyImport_FrozenStdlib;
+    const struct _frozen* base = _PyImport_FrozenStdlib;
     size_t n = 0;
     while (base && base[n].name) n++;
     const size_t m = sizeof(qf_frozen_table) / sizeof(qf_frozen_table[0]) - 1;
@@ -264,5 +265,5 @@ void qf_py_install_frozen(void) {
     memcpy(all, base, n * sizeof(*all));
     memcpy(all + n, qf_frozen_table, m * sizeof(*all));
     memset(all + n + m, 0, sizeof(*all));
-    PyImport_FrozenModules = all;
+    _PyImport_FrozenStdlib = all;
 }

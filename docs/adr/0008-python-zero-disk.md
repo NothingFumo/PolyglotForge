@@ -29,3 +29,16 @@
 - 当前仍走"内嵌 zip + 首次释放"：单文件、无伴随文件，但首次 UDF 会写一个缓存 zip。
 - 已落地的前置件：`scripts/freeze_encodings.py`（生成 122 个模块的冻结表）与 `qf_py_frozen.c`，已在链接里但不启用（`QF_USE_FROZEN_ENCODINGS` 未定义），等 CPython 重编后开启。
 - 第 1 步需要重跑 PCbuild（约 10 分钟），第 2 步约 300 行；两者都不改动任何语言阶段的契约。
+
+### 追加：分类指针同样不可改（最终结论）
+
+第二、三次尝试分别把扩展表接到 `PyImport_FrozenModules`（NULL 覆盖指针）与
+`_PyImport_FrozenStdlib`（分类指针）上，初始化仍报同一条 `failed to get the Python
+codec`。说明 3.11 的 `bootstrap_modules[] / stdlib_modules[]` 是 **`static const`**，
+导入机制直接读数组，任何运行期指针改写都无效。
+
+因此唯一可行路线是**构建期改 `Python/frozen.c` 的 `stdlib_modules[]`**：把
+`stages/python/frozen/*.h` 覆制到 `Python/frozen_modules/`，按 5 字段 `_frozen`
+（name/code/size/is_package/get_code，get_code 传 NULL）追加 122 条，再重编
+`python311.lib`。`stages/python/zip_finder.py`（内存 zip 导入器）与
+`scripts/embed_text.py`（把脚本转成 C 字符串）已就位，等重编后接线。
