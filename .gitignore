@@ -1,0 +1,29 @@
+# 构建产物
+/out/
+/dist/*.exe
+/dist/*.dll
+/dist/*.lib
+/dist/payload/
+*.o
+*.obj
+*.lib
+*.a
+*.exp
+*.pdb
+*.ilk
+
+# 各语言工具链目录
+/stages/rust/target/
+/stages/go/bin/
+/stages/csharp/**/bin/
+/stages/csharp/**/obj/
+/stages/kotlin/build/
+/stages/python/build/
+/stages/js/build/
+/node_modules/
+
+# 生成的中间文件（gen/ 下的产物仍然入库，便于逐提交自证）
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
