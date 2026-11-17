@@ -3,6 +3,8 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p out
+# shellcheck source=/dev/null
+. scripts/env.sh
 
 fail=0
 for s in c typescript cpp rust go csharp kotlin python js; do

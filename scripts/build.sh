@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
 # 全量构建：先让各语言产出静态库，再由 MinGW 统一链接成 dist/queryforge.exe。
-# 每个阶段的存在性用产物文件判断，缺阶段时启用 stubs.c 的占位实现。
+# 用法：build.sh [--allow-missing]
+# --allow-missing 时，某阶段构建失败只告警并继续（该阶段由 stubs.c 兜底），
+# 便于在语言阶段尚未全部就位时做增量集成。
 set -euo pipefail
+
+ALLOW_MISSING=0
+if [ "${1:-}" = "--allow-missing" ]; then ALLOW_MISSING=1; fi
+
 cd "$(dirname "$0")/.."
 root="$PWD"
+# shellcheck source=/dev/null
+. scripts/env.sh
 
 pick() {
     for c in "$@"; do
@@ -20,13 +28,18 @@ RUN="$(pick "$(command -v bun 2>/dev/null || true)" "$(command -v node 2>/dev/nu
             /mnt/d/nodejs/node.exe /d/nodejs/node.exe)" || { echo "找不到 bun 或 node" >&2; exit 1; }
 
 mkdir -p out dist
+rm -f out/stage-*.ok
 "$RUN" codegen/gen.ts > /dev/null
 
-# 各阶段先自建
+# 各阶段自建；成功的打标记，标记决定链接时是否纳入该阶段。
 for s in cpp rust go csharp kotlin python js; do
-    if [ -x "stages/$s/build.sh" ]; then
-        echo "[build] $s"
-        bash "stages/$s/build.sh"
+    [ -x "stages/$s/build.sh" ] || continue
+    echo "[build] $s"
+    if bash "stages/$s/build.sh"; then
+        touch "out/stage-$s.ok"
+    else
+        echo "[warn] $s 阶段构建失败，使用占位实现"
+        [ "$ALLOW_MISSING" = "1" ] || exit 1
     fi
 done
 
@@ -35,21 +48,50 @@ DEFS=()
 LIBS=()
 USE_CXX=0
 
-[ -f stages/cpp/libqf_cpp.a ]      && { SRC+=("stages/cpp/libqf_cpp.a");      DEFS+=(-DQF_HAVE_CPP); }
-[ -f stages/rust/libqf_rust.a ]    && { SRC+=("stages/rust/libqf_rust.a");    DEFS+=(-DQF_HAVE_RUST); }
-[ -f stages/go/out/libqf_go.a ]    && { SRC+=("stages/go/out/libqf_go.a");    DEFS+=(-DQF_HAVE_GO); LIBS+=(-lws2_32 -lwinmm -lntdll); }
-[ -f stages/csharp/out/qf_cs.lib ] && { SRC+=("stages/csharp/out/qf_cs.lib"); DEFS+=(-DQF_HAVE_CSHARP); LIBS+=(-lole32 -loleaut32 -luuid -lbcrypt); }
-[ -f stages/kotlin/build/libqf_kt.a ] && { SRC+=("stages/kotlin/build/libqf_kt.a"); DEFS+=(-DQF_HAVE_KOTLIN); }
-[ -f stages/python/out/qf_py.obj ] && { SRC+=("stages/python/out/qf_py.obj"); DEFS+=(-DQF_HAVE_PYTHON); LIBS+=("stages/python/out/python311.lib"); }
-[ -f stages/js/out/libqf_js.a ]    && { SRC+=("stages/js/out/libqf_js.a");    DEFS+=(-DQF_HAVE_JAVASCRIPT); }
+if [ -f out/stage-cpp.ok ]; then
+    SRC+=("stages/cpp/libqf_cpp.a"); DEFS+=(-DQF_HAVE_CPP); USE_CXX=1
+fi
+if [ -f out/stage-rust.ok ]; then
+    SRC+=("stages/rust/libqf_rust.a"); DEFS+=(-DQF_HAVE_RUST)
+fi
+if [ -f out/stage-go.ok ]; then
+    SRC+=("stages/go/out/libqf_go.a"); DEFS+=(-DQF_HAVE_GO)
+    LIBS+=(-lws2_32 -lwinmm -lntdll)
+fi
+if [ -f out/stage-csharp.ok ]; then
+    SRC+=("stages/csharp/out/qf_cs.lib"); DEFS+=(-DQF_HAVE_CSHARP)
+    LIBS+=(-lole32 -loleaut32 -luuid -lbcrypt)
+    AOT=""
+    # 链接器是 Windows 程序，只认盘符路径；探测用 MSYS 路径。
+    if [ -d /mnt/c/Users/Lenovo/.nuget/packages ]; then AOT="C:/Users/Lenovo/.nuget/packages"; fi
+    if [ -z "$AOT" ] && [ -d /c/Users/Lenovo/.nuget/packages ]; then AOT="C:/Users/Lenovo/.nuget/packages"; fi
+    if [ -n "$AOT" ]; then
+        NATIVE="$(ls -d "$AOT"/microsoft.netcore.app.runtime.nativeaot.win-x64/*/runtimes/win-x64/native 2>/dev/null | tail -1)"
+        if [ -n "$NATIVE" ]; then
+            SRC+=("$NATIVE/Runtime.WorkstationGC.lib" "$NATIVE/aotminipal.lib")
+        fi
+    fi
+fi
+if [ -f out/stage-kotlin.ok ]; then
+    SRC+=("stages/kotlin/build/libqf_kt.a"); DEFS+=(-DQF_HAVE_KOTLIN)
+fi
+if [ -f out/stage-python.ok ]; then
+    SRC+=("stages/python/out/qf_py.obj" "stages/python/out/python311.lib")
+    DEFS+=(-DQF_HAVE_PYTHON)
+fi
+if [ -f out/stage-js.ok ]; then
+    SRC+=("stages/js/out/libqf_js.a"); DEFS+=(-DQF_HAVE_JAVASCRIPT)
+fi
 
 SRC+=(stages/stubs/stubs.c)
 
 echo "[link] ${#SRC[@]} 个目标"
+LINK_LIBS=()
+[ "$USE_CXX" = "1" ] && LINK_LIBS+=(-lstdc++)
 "$CC" -std=c11 -O2 -Wall -Wextra -Igen -Icontracts -Istages/c \
       "${DEFS[@]}" "${SRC[@]}" \
       -o dist/queryforge.exe \
-      "${LIBS[@]}" -lstdc++ -lm
+      "${LIBS[@]}" "${LINK_LIBS[@]}" -lm
 
 echo "[done] dist/queryforge.exe"
 "$root/dist/queryforge.exe" --version
