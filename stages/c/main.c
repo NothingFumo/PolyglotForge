@@ -16,6 +16,12 @@
 
 qf_host qf_host_make(qf_arena* a);
 
+/* stages/js 的扩展入口（stages/js/qf_js_ext.h）。qf_batch 不带列名，
+   按真实列名求值必须把表结构一起交给 JS 沙箱；这里只做局部声明，
+   免得为一个内部扩展去动 contracts/qf.h。 */
+qf_err qf_js_where_named(const qf_host* host, qf_str expr, const qf_schema* cols,
+                         const qf_batch* batch, uint8_t* keep, qf_diag* diag);
+
 static const char* err_name(qf_err e) {
     switch (e) {
     case QF_ERR_OK: return "ok";
@@ -70,13 +76,14 @@ static void print_raw(const qf_result* r) {
 }
 
 typedef struct js_filter_ctx {
-    const qf_host* host;
-    qf_str expr;
+    const qf_host*   host;
+    qf_str           expr;
+    const qf_schema* table;
 } js_filter_ctx;
 
 static qf_err js_filter_fn(void* ctx, const qf_batch* batch, uint8_t* keep, qf_diag* diag) {
     js_filter_ctx* f = (js_filter_ctx*)ctx;
-    return qf_js_where(f->host, f->expr, batch, keep, diag);
+    return qf_js_where_named(f->host, f->expr, f->table, batch, keep, diag);
 }
 
 typedef struct cs_filter_ctx {
@@ -134,27 +141,27 @@ static qf_err exec_query(run_env* env, qf_str sql, run_out* out, qf_diag* diag) 
     cs_filter_ctx csctx;
     memset(&csctx, 0, sizeof csctx);
 
-    if (ast->where_root >= 0) {
-        if (env->where_js) {
-            jsctx.host = env->host;
-            jsctx.expr = S(env->where_js);
-            filter = js_filter_fn;
-            (void)jsctx;
+    if (env->where_js) {
+        /* --where 是“替代编译谓词”的过滤器：SQL 里有没有 WHERE 都要装上，
+           否则 where_root < 0 的查询会静默跳过沙箱。 */
+        jsctx.host = env->host;
+        jsctx.expr = S(env->where_js);
+        jsctx.table = &table;
+        filter = js_filter_fn;
+    } else if (ast->where_root >= 0) {
+        qf_pred* pred = NULL;
+        qf_diag pdiag;
+        memset(&pdiag, 0, sizeof pdiag);
+        rc = qf_cs_compile(env->host, ast, ast->where_root, &table, &pred, &pdiag);
+        if (rc == QF_ERR_OK) {
+            csctx.pred = pred;
+            filter = cs_filter_fn;
+        } else if (rc == QF_ERR_UNSUPPORTED) {
+            filter = NULL; /* 由引擎自带的求值器兜底 */
+            rc = QF_ERR_OK;
         } else {
-            qf_pred* pred = NULL;
-            qf_diag pdiag;
-            memset(&pdiag, 0, sizeof pdiag);
-            rc = qf_cs_compile(env->host, ast, ast->where_root, &table, &pred, &pdiag);
-            if (rc == QF_ERR_OK) {
-                csctx.pred = pred;
-                filter = cs_filter_fn;
-            } else if (rc == QF_ERR_UNSUPPORTED) {
-                filter = NULL; /* 由引擎自带的求值器兜底 */
-                rc = QF_ERR_OK;
-            } else {
-                if (diag) *diag = pdiag;
-                return rc;
-            }
+            if (diag) *diag = pdiag;
+            return rc;
         }
     }
 
@@ -326,7 +333,8 @@ int main(int argc, char** argv) {
         }
         run_out out;
         memset(&out, 0, sizeof out);
-        qf_err rc = exec_query(&env, S(sql), &out, &diag);
+        /* 只给 --dsl 时没有位置 SQL：S(NULL) 会在 strlen 上崩，这里给空串。 */
+        qf_err rc = exec_query(&env, sql ? S(sql) : S(""), &out, &diag);
         if (rc != QF_ERR_OK) {
             print_diag(&diag);
             status = 65;
