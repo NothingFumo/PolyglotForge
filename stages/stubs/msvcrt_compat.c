@@ -12,6 +12,9 @@
 
 uintptr_t __security_cookie = 0x00002B992DDFA232ull;
 
+/* MSVC 目标文件在用到浮点时会引用这个哨兵符号。 */
+int _fltused = 0;
+
 void __security_check_cookie(uintptr_t cookie) {
     if (cookie != __security_cookie && cookie != 0) {
         abort();
