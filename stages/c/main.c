@@ -87,6 +87,7 @@ typedef struct run_env {
     qf_arena* arena;
     const char* table_path;
     const char* where_js;
+    const char* dsl;
     int explain;
     int raw;
     int quiet;
@@ -101,7 +102,8 @@ typedef struct run_out {
 
 static qf_err exec_query(run_env* env, qf_str sql, run_out* out, qf_diag* diag) {
     qf_ast* ast = NULL;
-    qf_err rc = qf_sql_parse(env->host, sql, &ast, diag);
+    qf_err rc = env->dsl ? qf_dsl_build(env->host, S(env->dsl), &ast, diag)
+                         : qf_sql_parse(env->host, sql, &ast, diag);
     if (rc != QF_ERR_OK) return rc;
 
     qf_schema table;
@@ -202,6 +204,7 @@ static void usage(void) {
         "  --explain            打印计划，不执行\n"
         "  --raw                输出 TSV（跳过 JS 表格渲染）\n"
         "  --where <js-expr>    用 JS 沙箱过滤（替代编译谓词）\n"
+        "  --dsl <文本>         用 Kotlin DSL 代替 SQL\n"
         "  --plugin <file.py>   加载 UDF 插件\n"
         "  --shards <n>         扫描分片数（默认 8）\n"
         "  --batch \"<q1>;<q2>\"  用 Kotlin 协程并发执行多条查询\n"
@@ -236,6 +239,7 @@ int main(int argc, char** argv) {
         if (strcmp(a, "--explain") == 0) env.explain = 1;
         else if (strcmp(a, "--raw") == 0) env.raw = 1;
         else if (strcmp(a, "--where") == 0 && i + 1 < argc) env.where_js = argv[++i];
+        else if (strcmp(a, "--dsl") == 0 && i + 1 < argc) env.dsl = argv[++i];
         else if (strcmp(a, "--plugin") == 0 && i + 1 < argc) plugin = argv[++i];
         else if (strcmp(a, "--shards") == 0 && i + 1 < argc) env.shards = atoi(argv[++i]);
         else if (strcmp(a, "--batch") == 0 && i + 1 < argc) batch = argv[++i];
@@ -306,7 +310,7 @@ int main(int argc, char** argv) {
             for (uint32_t i = 0; i < n; ++i) printf("query %u: %llu rows\n", i + 1, (unsigned long long)rows[i]);
         }
     } else {
-        if (!sql) {
+        if (!sql && !env.dsl) {
             usage();
             qf_arena_free(arena);
             return 64;
