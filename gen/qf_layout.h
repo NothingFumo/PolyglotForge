@@ -8,16 +8,16 @@
 
 typedef int32_t qf_err;
 enum {
-    QF_OK = 0,
-    QF_ARG = 1,
-    QF_IO = 2,
-    QF_PARSE = 3,
-    QF_TYPE = 4,
-    QF_PLAN = 5,
-    QF_EXEC = 6,
-    QF_UDF = 7,
-    QF_PANIC = 8,
-    QF_UNSUPPORTED = 9
+    QF_ERR_OK = 0,
+    QF_ERR_ARG = 1,
+    QF_ERR_IO = 2,
+    QF_ERR_PARSE = 3,
+    QF_ERR_TYPE = 4,
+    QF_ERR_PLAN = 5,
+    QF_ERR_EXEC = 6,
+    QF_ERR_UDF = 7,
+    QF_ERR_PANIC = 8,
+    QF_ERR_UNSUPPORTED = 9
 };
 
 typedef int32_t qf_type;

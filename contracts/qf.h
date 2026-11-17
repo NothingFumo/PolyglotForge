@@ -17,6 +17,8 @@ extern "C" {
 
 /* ---------- 宿主服务 ---------- */
 
+typedef struct qf_arena qf_arena;
+
 typedef struct qf_host {
     void*  (*alloc)(void* ctx, uint64_t size, uint64_t align);
     qf_str (*str)(void* ctx, const char* src, uint32_t len);
