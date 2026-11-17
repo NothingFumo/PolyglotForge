@@ -25,6 +25,13 @@ echo "[python] 编译 qf_py.c"
       -Foout/qf_py.obj qf_py.c
 [ -f out/qf_py.obj ] || die "cl 没有产出 out/qf_py.obj"
 
+echo "[python] 编译冻结的 encodings 表"
+"$QF_CL" -nologo -c -O2 -MD -W4 -D_CRT_SECURE_NO_WARNINGS -DPy_NO_ENABLE_SHARED \
+      -Ivendor/Python-3.11.9/Include -Ivendor/Python-3.11.9/PC \
+      -I../../gen -I../../contracts \
+      -Foout/qf_py_frozen.obj qf_py_frozen.c
+[ -f out/qf_py_frozen.obj ] || die "cl 没有产出 out/qf_py_frozen.obj"
+
 lib_src="$vendor/PCbuild/amd64/python311.lib"
 if [ ! -f "$lib_src" ]; then
     echo "[python] 静态 CPython 库还不存在，开始构建（耗时较长）"

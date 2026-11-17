@@ -191,7 +191,7 @@ prepare_msvc_side() {
     fi
 
     if [ -f out/stage-python.ok ]; then
-        P_SRC+=("stages/python/out/qf_py.obj")
+        P_SRC+=("stages/python/out/qf_py.obj" "stages/python/out/qf_py_frozen.obj")
         P_DEFS+=(-DQF_HAVE_PYTHON)
         repack python311 stages/python/out/python311.lib || return 1
         P_LIBS+=("$MSVC_DIR/libs/python311.a")

@@ -201,6 +201,15 @@ static char* dup_bytes(const char* p, uint32_t n) {
 static qf_err py_start(const qf_host* host, qf_diag* diag) {
     if (g_initialized) return QF_ERR_OK;
 
+    /* encodings 在导入机制可用之前就会被用到。
+       注意：仅替换 PyImport_FrozenModules 指针在静态构建下不生效——
+       CPython 内部的 FrozenImporter 读的是编译期数组 _PyImport_FrozenModules，
+       因此这一步必须在 CPython 构建期完成（见 docs/adr/0008）。 */
+#ifdef QF_USE_FROZEN_ENCODINGS
+    extern void qf_py_install_frozen(void);
+    qf_py_install_frozen();
+#endif
+
     PyConfig cfg;
     PyConfig_InitPythonConfig(&cfg);
     cfg.parse_argv = 0;
