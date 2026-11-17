@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    谓词阶段：.NET 10 + NativeAOT 静态库。
+    产物 stages/csharp/out/qf_cs.lib 由宿主用 MinGW/MSVC 链接，
+    跨边界只暴露 contracts/qf.h 里的三个 qf_cs_* 函数。
+
+    NativeLib=Static 时 AOT 编译器产出静态库而非 exe/dll，
+    因此必须是 Library 输出类型且不能有入口点。
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <AssemblyName>qf_cs</AssemblyName>
+    <RootNamespace>QfCs</RootNamespace>
+
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+
+    <PublishAot>true</PublishAot>
+    <NativeLib>Static</NativeLib>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <StripSymbols>false</StripSymbols>
+    <Deterministic>true</Deterministic>
+
+    <!-- 表达式树只用来解释执行，不生成 IL；AOT 下的 IL3050 是预期行为。 -->
+    <NoWarn>$(NoWarn);IL3050;IL2026</NoWarn>
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+  </PropertyGroup>
+
+</Project>
