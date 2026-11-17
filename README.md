@@ -56,7 +56,19 @@ $ ./dist/queryforge-all.exe tests/e2e/data/users.csv \
 | `queryforge.exe`（gcc） | `libstdc++-6.dll`、`ucrtbase.dll` + api-set | Kotlin/Native 归档引用 libstdc++ 的 RTTI vtable（`__class_type_info`），静态化即 `undefined reference`；`libgcc` 与 `winpthread` 已静态化 |
 | `queryforge-all.exe`（MSVC） | `VCRUNTIME140.dll`、`VCRUNTIME140_1.dll`、`ucrtbase.dll` | NativeAOT 与 CPython 都以 `/MD` 构建 |
 
-Python 标准库目前仍来自系统安装，属于 ADR 0001 里尚未落地的载荷。
+Python 标准库已作为载荷内嵌：构建期把 `Lib/` 压成 `lib.zip`（排除 test/tkinter），
+以 `ld -r -b binary` 链入，首次运行释放到
+`%LOCALAPPDATA%\PolyglotForge\payload\<内容指纹>\lib.zip` 并挂到
+`module_search_paths`（zipimport 原生支持）。可用探针插件确认：
+
+```console
+$ ./dist/queryforge.exe tests/e2e/data/users.csv \
+    "select stdlib_origin(1) as p from t limit 1" --plugin stages/python/fixtures/probe_path.py --raw
+p
+C:\Users\<user>\AppData\Local\PolyglotForge\payload\<hash>\lib.zip\json\__init__.py
+```
+
+因此产物的外部依赖只剩上表的 CRT DLL；本机是否安装 Python 不再影响运行。
 
 ## 构建
 
