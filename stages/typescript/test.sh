@@ -14,5 +14,7 @@ CC="$(qf_require "$(command -v gcc 2>/dev/null || true)" /mnt/c/Strawberry/c/bin
 cd "$root"
 mkdir -p out
 "$RUN" codegen/gen.ts > /dev/null
+PY="$(qf_require_python)" || { echo "找不到 python" >&2; exit 1; }
+"$PY" -c 'import importlib.util; spec = importlib.util.spec_from_file_location("qf_layout", "gen/qf_layout.py"); mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); print("python layout OK")'
 "$CC" -std=c11 -Wall -Wextra -Werror -Igen tests/typescript/layout_check.c -o out/layout_check.exe
 ./out/layout_check.exe

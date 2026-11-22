@@ -7,6 +7,20 @@ int main(void) {
         printf("布局漂移\n");
         return 1;
     }
+    if (sizeof(qf_col) != 24 || sizeof(qf_schema) != 16 ||
+        sizeof(qf_batch) != 16 || sizeof(qf_result) != 32) {
+        printf("表/批次/结果布局漂移\n");
+        return 1;
+    }
+    if (sizeof(qf_diag) != 48 || offsetof(qf_diag, hint) != 32) {
+        printf("诊断布局漂移\n");
+        return 1;
+    }
+    if (sizeof(qf_ast) != 104 || offsetof(qf_ast, select_names) != 32 ||
+        offsetof(qf_ast, from_table) != 40 || offsetof(qf_ast, limit) != 96) {
+        printf("计划布局漂移\n");
+        return 1;
+    }
     if (QF_N_LIT != 1 || QF_OP_EQ != 1 || QF_AGG_COUNT != 1 || QF_T_TEXT != 3) {
         printf("常量漂移\n");
         return 1;

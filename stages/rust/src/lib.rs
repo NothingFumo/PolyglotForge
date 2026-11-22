@@ -177,6 +177,9 @@ const _: () = assert!(std::mem::size_of::<qf_col>() == 24);
 const _: () = assert!(std::mem::size_of::<qf_diag>() == 48);
 const _: () = assert!(std::mem::size_of::<qf_ast>() == 104);
 
+// 布局由 schema/qf.ts 生成，防止手写结构漂移。
+include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../gen/qf_layout_assert.rs"));
+
 /* ---------- 诊断 ---------- */
 
 struct PlanError {

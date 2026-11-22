@@ -66,92 +66,12 @@ internal static class QfFlags
     public const int Resolved = 32;
 }
 
-/// <summary>qf_str：文本一律 (ptr, len)，不假设 NUL 结尾。</summary>
-[StructLayout(LayoutKind.Sequential)]
-internal unsafe struct QfStr
-{
-    public byte* Ptr;
-    public uint Len;
-}
-
-/// <summary>qf_value：type 在 0，联合体在 8（最大成员 qf_str 为 16 字节），共 24 字节。</summary>
-[StructLayout(LayoutKind.Explicit, Size = 24)]
-internal struct QfValue
-{
-    [FieldOffset(0)] public int Type;
-    [FieldOffset(8)] public long I;
-    [FieldOffset(8)] public double D;
-    [FieldOffset(8)] public QfStr S;
-}
-
-/// <summary>qf_node：kind/op/flags/a/b/argc 之后是 lit（对齐 8）与 name，共 56 字节。</summary>
-[StructLayout(LayoutKind.Sequential)]
-internal struct QfNode
-{
-    public byte Kind;
-    public byte Op;
-    public ushort Flags;
-    public int A;
-    public int B;
-    public int Argc;
-    public QfValue Lit;
-    public QfStr Name;
-}
-
-[StructLayout(LayoutKind.Sequential)]
-internal unsafe struct QfAst
-{
-    public QfNode* Nodes;
-    public uint NodeCount;
-    public int* Select;
-    public uint SelectCount;
-    public QfStr FromTable;
-    public int WhereRoot;
-    public int* GroupBy;
-    public uint GroupCount;
-    public int* OrderBy;
-    public uint OrderCount;
-    public long Limit;
-}
-
-[StructLayout(LayoutKind.Sequential)]
-internal unsafe struct QfCol
-{
-    public QfStr Name;
-    public int Type;
-}
-
-[StructLayout(LayoutKind.Sequential)]
-internal unsafe struct QfSchema
-{
-    public uint Count;
-    public QfCol* Cols;
-}
-
-[StructLayout(LayoutKind.Sequential)]
-internal unsafe struct QfDiag
-{
-    public int Code;
-    public uint Line;
-    public uint Col;
-    public QfStr Message;
-    public QfStr Hint;
-}
-
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct QfHost
 {
     public delegate* unmanaged<byte*, ulong, ulong, byte*> Alloc;
     public delegate* unmanaged<byte*, byte*, uint, QfStr> Str;
     public byte* Ctx;
-}
-
-[StructLayout(LayoutKind.Sequential)]
-internal unsafe struct QfBatch
-{
-    public uint Rows;
-    public uint Cols;
-    public QfValue* Values;
 }
 
 internal static unsafe class Abi

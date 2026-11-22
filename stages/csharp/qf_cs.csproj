@@ -31,4 +31,8 @@
     <TrimmerSingleWarn>false</TrimmerSingleWarn>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Compile Include="..\..\gen\qf_layout.cs" Link="qf_layout.cs" />
+  </ItemGroup>
+
 </Project>

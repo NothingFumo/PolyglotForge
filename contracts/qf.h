@@ -25,64 +25,9 @@ typedef struct qf_host {
     void*  ctx;
 } qf_host;
 
-/* ---------- 诊断 ---------- */
-
-typedef struct qf_diag {
-    qf_err   code;
-    uint32_t line;
-    uint32_t col;
-    qf_str   message;
-    qf_str   hint;
-} qf_diag;
-
-/* ---------- 表与结果 ---------- */
-
-typedef struct qf_col {
-    qf_str  name;
-    qf_type type;
-} qf_col;
-
-typedef struct qf_schema {
-    uint32_t count;
-    qf_col*  cols;
-} qf_schema;
-
-/* 计划：经过语义分析与列解析之后的 AST。Rust 在节点 flags 里回填类型。 */
-typedef struct qf_ast {
-    qf_node* nodes;
-    uint32_t node_count;
-
-    int32_t* select;
-    uint32_t select_count;
-
-    /* 与 select 等长：第 i 项的输出列名（AS 别名），无别名时为空串。
-       不使用 qf_node.name 承载别名，否则会覆盖列名与 UDF 名。 */
-    qf_str*  select_names;
-
-    qf_str   from_table;
-    int32_t  where_root; /* -1 表示无 */
-
-    int32_t* group_by;
-    uint32_t group_count;
-
-    int32_t* order_by;
-    uint32_t order_count;
-
-    int64_t  limit; /* -1 表示无 */
-} qf_ast;
-
-/* 批次：一次跨语言传递的行集合，行主序。 */
-typedef struct qf_batch {
-    uint32_t  rows;
-    uint32_t  cols;
-    qf_value* values;
-} qf_batch;
-
-typedef struct qf_result {
-    qf_schema schema;
-    uint64_t  row_count;
-    qf_value* values; /* row_count * schema.count，行主序 */
-} qf_result;
+/* ---------- 诊断 / 表 / 计划 / 批次 / 结果 ---------- */
+/* 结构体由 schema/qf.ts 生成到 gen/qf_layout.h；
+   本文件只声明跨语言函数，避免结构体在语言之间手抄。 */
 
 /* ---------- 阶段：C++ 词法与语法 ---------- */
 

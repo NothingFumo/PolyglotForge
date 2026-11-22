@@ -19,11 +19,23 @@ const enumC = (prefix: string, entries: Record<string, number>, type = '') => {
     : `enum {\n${body}\n};`;
 };
 
+const cStructs = Object.entries(LAYOUT)
+  .map(([name, l]) => `typedef struct ${name} {\n${l.fields.map((f) => `    ${f.c} ${f.name};`).join('\n')}\n} ${name};`)
+  .join('\n\n');
+
+const cAsserts = Object.entries(LAYOUT)
+  .map(([name, l]) => [
+    `QF_STATIC_ASSERT(sizeof(${name}) == ${l.size}, "${name} 尺寸漂移");`,
+    ...l.fields.map((f) => `QF_STATIC_ASSERT(offsetof(${name}, ${f.name}) == ${f.off}, "${name}.${f.name} 偏移漂移");`),
+  ].join('\n'))
+  .join('\n');
+
 // ---------------- C ----------------
 const cLayout = `
 #ifndef QF_LAYOUT_H
 #define QF_LAYOUT_H
 #include <stdint.h>
+#include <stddef.h>
 
 #define QF_ABI_VERSION ${ABI_VERSION}
 
@@ -46,23 +58,7 @@ enum {
     QF_F_RESOLVED = ${FLAGS.RESOLVED}
 };
 
-typedef struct qf_str { const char* ptr; uint32_t len; } qf_str;
-
-typedef struct qf_value {
-    qf_type type;
-    union { int64_t i; double d; qf_str s; } as;
-} qf_value;
-
-typedef struct qf_node {
-    uint8_t kind;
-    uint8_t op;
-    uint16_t flags;
-    int32_t a;
-    int32_t b;
-    int32_t argc;
-    qf_value lit;
-    qf_str name;
-} qf_node;
+${cStructs}
 
 #if defined(__cplusplus)
 #define QF_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
@@ -72,66 +68,37 @@ typedef struct qf_node {
 #define QF_STATIC_ASSERT(cond, msg)
 #endif
 
-${Object.entries(LAYOUT).map(([name, l]) => `QF_STATIC_ASSERT(sizeof(${name}) == ${l.size}, "${name} 布局漂移");`).join('\n')}
+${cAsserts}
 
 #endif /* QF_LAYOUT_H */
 `;
 
 // ---------------- C# ----------------
+const csStructs = Object.entries(LAYOUT)
+  .map(([name, l]) => {
+    const fields: { name: string; cs: string; off: number }[] =
+      'csFields' in l ? l.csFields : l.fields;
+    const structName =
+      'Qf' + name.replace(/^qf_/, '').replace(/(^|_)([a-z])/g, (_m, _p, c) => c.toUpperCase());
+    const lines = fields.map((f) => {
+      const fieldName = f.name.replace(/(^|_)([a-z])/g, (_m, _p, c) => c.toUpperCase());
+      return `    [FieldOffset(${f.off})] public ${f.cs} ${fieldName};`;
+    });
+    return `[StructLayout(LayoutKind.Explicit, Size = ${l.size})]
+internal unsafe struct ${structName}
+{
+${lines.join('\n')}
+}`;
+  })
+  .join('\n\n');
+
 const csLayout = `
+// 由 schema/qf.ts + codegen/gen.ts 生成，勿手改
 using System.Runtime.InteropServices;
 
-namespace Qf;
+namespace QfCs;
 
-public static class Abi
-{
-    public const int Version = ${ABI_VERSION};
-}
-
-public enum QfErr : int
-{
-${Object.entries(ERR).map(([k, v]) => `    ${k[0] + k.slice(1).toLowerCase()} = ${v},`).join('\n')}
-}
-
-public enum QfType : int
-{
-${Object.entries(TYPE).map(([k, v]) => `    ${k[0] + k.slice(1).toLowerCase()} = ${v},`).join('\n')}
-}
-
-[StructLayout(LayoutKind.Explicit, Size = 16)]
-public unsafe struct QfStr
-{
-    [FieldOffset(0)] public byte* Ptr;
-    [FieldOffset(8)] public uint Len;
-}
-
-[StructLayout(LayoutKind.Explicit, Size = 16)]
-public unsafe struct QfValueUnion
-{
-    [FieldOffset(0)] public long I;
-    [FieldOffset(0)] public double D;
-    [FieldOffset(0)] public QfStr S;
-}
-
-[StructLayout(LayoutKind.Explicit, Size = 24)]
-public unsafe struct QfValue
-{
-    [FieldOffset(0)] public int Type;
-    [FieldOffset(8)] public QfValueUnion As;
-}
-
-[StructLayout(LayoutKind.Explicit, Size = 56)]
-public unsafe struct QfNode
-{
-    [FieldOffset(0)] public byte Kind;
-    [FieldOffset(1)] public byte Op;
-    [FieldOffset(2)] public ushort Flags;
-    [FieldOffset(4)] public int A;
-    [FieldOffset(8)] public int B;
-    [FieldOffset(12)] public int Argc;
-    [FieldOffset(16)] public QfValue Lit;
-    [FieldOffset(40)] public QfStr Name;
-}
+${csStructs}
 `;
 
 // ---------------- Python ----------------
@@ -164,6 +131,57 @@ class QfNode(ctypes.Structure):
     ]
 
 
+class QfCol(ctypes.Structure):
+    _fields_ = [("name", QfStr), ("type", ctypes.c_int32)]
+
+
+class QfSchema(ctypes.Structure):
+    _fields_ = [("count", ctypes.c_uint32), ("cols", ctypes.POINTER(QfCol))]
+
+
+class QfBatch(ctypes.Structure):
+    _fields_ = [
+        ("rows", ctypes.c_uint32),
+        ("cols", ctypes.c_uint32),
+        ("values", ctypes.POINTER(QfValue)),
+    ]
+
+
+class QfResult(ctypes.Structure):
+    _fields_ = [
+        ("schema", QfSchema),
+        ("row_count", ctypes.c_uint64),
+        ("values", ctypes.POINTER(QfValue)),
+    ]
+
+
+class QfDiag(ctypes.Structure):
+    _fields_ = [
+        ("code", ctypes.c_int32),
+        ("line", ctypes.c_uint32),
+        ("col", ctypes.c_uint32),
+        ("message", QfStr),
+        ("hint", QfStr),
+    ]
+
+
+class QfAst(ctypes.Structure):
+    _fields_ = [
+        ("nodes", ctypes.POINTER(QfNode)),
+        ("node_count", ctypes.c_uint32),
+        ("select", ctypes.POINTER(ctypes.c_int32)),
+        ("select_count", ctypes.c_uint32),
+        ("select_names", ctypes.POINTER(QfStr)),
+        ("from_table", QfStr),
+        ("where_root", ctypes.c_int32),
+        ("group_by", ctypes.POINTER(ctypes.c_int32)),
+        ("group_count", ctypes.c_uint32),
+        ("order_by", ctypes.POINTER(ctypes.c_int32)),
+        ("order_count", ctypes.c_uint32),
+        ("limit", ctypes.c_int64),
+    ]
+
+
 ABI_VERSION = ${ABI_VERSION}
 QF_OK = ${ERR.OK}
 QF_ERR_PARSE = ${ERR.PARSE}
@@ -175,6 +193,44 @@ QF_T_NULL, QF_T_INT, QF_T_DOUBLE, QF_T_TEXT = ${TYPE.NULL}, ${TYPE.INT}, ${TYPE.
 QF_NODE_KIND = ${JSON.stringify(NODE_KIND)}
 QF_OP = ${JSON.stringify(OP)}
 QF_AGG = ${JSON.stringify(AGG)}
+
+assert ctypes.sizeof(QfStr) == 16
+assert ctypes.sizeof(QfValue) == 24
+assert ctypes.sizeof(QfNode) == 56
+assert ctypes.sizeof(QfCol) == 24
+assert ctypes.sizeof(QfSchema) == 16
+assert ctypes.sizeof(QfBatch) == 16
+assert ctypes.sizeof(QfResult) == 32
+assert ctypes.sizeof(QfDiag) == 48
+assert ctypes.sizeof(QfAst) == 104
+assert QfAst.select_names.offset == 32
+assert QfAst.limit.offset == 96
+`;
+
+// ---------------- Rust: 布局断言 ----------------
+const rustTypes: Record<string, true> = {
+  qf_str: true,
+  qf_value: true,
+  qf_node: true,
+  qf_col: true,
+  qf_schema: true,
+  qf_diag: true,
+  qf_ast: true,
+};
+const rustAsserts = Object.entries(LAYOUT)
+  .filter(([name]) => rustTypes[name])
+  .map(([name, l]) => {
+    const lines = [`const _: () = assert!(std::mem::size_of::<${name}>() == ${l.size});`];
+    for (const f of l.fields) {
+      const fieldName = f.name === 'type' ? 'type_' : f.name === 'as' ? 'as_' : f.name;
+      lines.push(`const _: () = assert!(std::mem::offset_of!(${name}, ${fieldName}) == ${f.off});`);
+    }
+    return lines.join('\n');
+  })
+  .join('\n');
+
+const rustLayout = `// 由 schema/qf.ts + codegen/gen.ts 生成，勿手改
+${rustAsserts}
 `;
 
 // ---------------- C: 关键字与展示名 ----------------
@@ -197,7 +253,8 @@ static const char* const QF_AGG_NAME[] = {
 
 write('gen/qf_layout.h', cLayout);
 write('gen/qf_layout.cs', csLayout);
-write('gen/qf_layout.py', pyLayout);
+writeFileSync('gen/qf_layout.py', '# 由 schema/qf.ts + codegen/gen.ts 生成，勿手改\n' + pyLayout, 'utf8');
+write('gen/qf_layout_assert.rs', rustLayout);
 write('gen/qf_keywords.h', cKeywords);
-console.log('generated:', ['gen/qf_layout.h', 'gen/qf_layout.cs', 'gen/qf_layout.py', 'gen/qf_keywords.h'].join(', '));
+console.log('generated:', ['gen/qf_layout.h', 'gen/qf_layout.cs', 'gen/qf_layout.py', 'gen/qf_layout_assert.rs', 'gen/qf_keywords.h'].join(', '));
 console.log('agg names:', Object.values(AGG_NAMES).join(','));

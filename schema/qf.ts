@@ -55,6 +55,7 @@ export const FLAGS = { TYPE_SHIFT: 0, TYPE_MASK: 0xf, DESC: 1 << 4, RESOLVED: 1 
 
 /** 结构体字段布局：offset/size 由契约约定，生成端与消费端共用同一张表。 */
 export type Field = { name: string; c: string; cs: string; off: number; size: number };
+export type CsField = { name: string; cs: string; off: number; size: number };
 
 export const LAYOUT = {
   qf_str: {
@@ -70,6 +71,13 @@ export const LAYOUT = {
       { name: 'type', c: 'qf_type', cs: 'int', off: 0, size: 4 },
       { name: 'as', c: 'union { int64_t i; double d; qf_str s; }', cs: 'qf_value_union', off: 8, size: 16 },
     ] as Field[],
+    // C# 侧把联合体展开成三个同偏移字段，语义与 C 的 union 一致。
+    csFields: [
+      { name: 'type', cs: 'int', off: 0, size: 4 },
+      { name: 'i', cs: 'long', off: 8, size: 8 },
+      { name: 'd', cs: 'double', off: 8, size: 8 },
+      { name: 's', cs: 'QfStr', off: 8, size: 16 },
+    ] as CsField[],
   },
   qf_node: {
     size: 56,
@@ -80,8 +88,65 @@ export const LAYOUT = {
       { name: 'a', c: 'int32_t', cs: 'int', off: 4, size: 4 },
       { name: 'b', c: 'int32_t', cs: 'int', off: 8, size: 4 },
       { name: 'argc', c: 'int32_t', cs: 'int', off: 12, size: 4 },
-      { name: 'lit', c: 'qf_value', cs: 'qf_value', off: 16, size: 24 },
-      { name: 'name', c: 'qf_str', cs: 'qf_str', off: 40, size: 16 },
+      { name: 'lit', c: 'qf_value', cs: 'QfValue', off: 16, size: 24 },
+      { name: 'name', c: 'qf_str', cs: 'QfStr', off: 40, size: 16 },
+    ] as Field[],
+  },
+  qf_col: {
+    size: 24,
+    fields: [
+      { name: 'name', c: 'qf_str', cs: 'QfStr', off: 0, size: 16 },
+      { name: 'type', c: 'qf_type', cs: 'int', off: 16, size: 4 },
+    ] as Field[],
+  },
+  qf_schema: {
+    size: 16,
+    fields: [
+      { name: 'count', c: 'uint32_t', cs: 'uint', off: 0, size: 4 },
+      { name: 'cols', c: 'qf_col*', cs: 'QfCol*', off: 8, size: 8 },
+    ] as Field[],
+  },
+  qf_batch: {
+    size: 16,
+    fields: [
+      { name: 'rows', c: 'uint32_t', cs: 'uint', off: 0, size: 4 },
+      { name: 'cols', c: 'uint32_t', cs: 'uint', off: 4, size: 4 },
+      { name: 'values', c: 'qf_value*', cs: 'QfValue*', off: 8, size: 8 },
+    ] as Field[],
+  },
+  qf_result: {
+    size: 32,
+    fields: [
+      { name: 'schema', c: 'qf_schema', cs: 'QfSchema', off: 0, size: 16 },
+      { name: 'row_count', c: 'uint64_t', cs: 'ulong', off: 16, size: 8 },
+      { name: 'values', c: 'qf_value*', cs: 'QfValue*', off: 24, size: 8 },
+    ] as Field[],
+  },
+  qf_diag: {
+    size: 48,
+    fields: [
+      { name: 'code', c: 'qf_err', cs: 'int', off: 0, size: 4 },
+      { name: 'line', c: 'uint32_t', cs: 'uint', off: 4, size: 4 },
+      { name: 'col', c: 'uint32_t', cs: 'uint', off: 8, size: 4 },
+      { name: 'message', c: 'qf_str', cs: 'QfStr', off: 16, size: 16 },
+      { name: 'hint', c: 'qf_str', cs: 'QfStr', off: 32, size: 16 },
+    ] as Field[],
+  },
+  qf_ast: {
+    size: 104,
+    fields: [
+      { name: 'nodes', c: 'qf_node*', cs: 'QfNode*', off: 0, size: 8 },
+      { name: 'node_count', c: 'uint32_t', cs: 'uint', off: 8, size: 4 },
+      { name: 'select', c: 'int32_t*', cs: 'int*', off: 16, size: 8 },
+      { name: 'select_count', c: 'uint32_t', cs: 'uint', off: 24, size: 4 },
+      { name: 'select_names', c: 'qf_str*', cs: 'QfStr*', off: 32, size: 8 },
+      { name: 'from_table', c: 'qf_str', cs: 'QfStr', off: 40, size: 16 },
+      { name: 'where_root', c: 'int32_t', cs: 'int', off: 56, size: 4 },
+      { name: 'group_by', c: 'int32_t*', cs: 'int*', off: 64, size: 8 },
+      { name: 'group_count', c: 'uint32_t', cs: 'uint', off: 72, size: 4 },
+      { name: 'order_by', c: 'int32_t*', cs: 'int*', off: 80, size: 8 },
+      { name: 'order_count', c: 'uint32_t', cs: 'uint', off: 88, size: 4 },
+      { name: 'limit', c: 'int64_t', cs: 'long', off: 96, size: 8 },
     ] as Field[],
   },
 } as const;
