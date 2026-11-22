@@ -27,34 +27,31 @@ root="$PWD"
 # shellcheck source=/dev/null
 . scripts/env.sh
 
-pick() {
-    for c in "$@"; do
-        if [ -n "$c" ] && [ -x "$c" ]; then printf '%s' "$c"; return 0; fi
-    done
-    return 1
-}
-CC="$(pick "$(command -v gcc 2>/dev/null || true)" /mnt/c/Strawberry/c/bin/gcc.exe /c/Strawberry/c/bin/gcc.exe)" \
+CC="$(qf_require "$(command -v gcc 2>/dev/null || true)" /mnt/c/Strawberry/c/bin/gcc.exe /c/Strawberry/c/bin/gcc.exe)" \
     || { echo "找不到 gcc" >&2; exit 1; }
-CXX="$(pick "$(command -v g++ 2>/dev/null || true)" /mnt/c/Strawberry/c/bin/g++.exe /c/Strawberry/c/bin/g++.exe)" \
+CXX="$(qf_require "$(command -v g++ 2>/dev/null || true)" /mnt/c/Strawberry/c/bin/g++.exe /c/Strawberry/c/bin/g++.exe)" \
     || { echo "找不到 g++" >&2; exit 1; }
-RUN="$(pick "$(command -v bun 2>/dev/null || true)" "$(command -v node 2>/dev/null || true)" \
+RUN="$(qf_require "$(command -v bun 2>/dev/null || true)" "$(command -v node 2>/dev/null || true)" \
             /mnt/c/Users/Lenovo/.bun/bin/bun.exe /c/Users/Lenovo/.bun/bin/bun.exe \
             /mnt/d/nodejs/node.exe /d/nodejs/node.exe)" || { echo "找不到 bun 或 node" >&2; exit 1; }
-PY="$(pick "$(command -v python 2>/dev/null || true)" "$(command -v python3 2>/dev/null || true)" \
+PY="$(qf_require "$(command -v python 2>/dev/null || true)" "$(command -v python3 2>/dev/null || true)" \
            /mnt/d/Python/Python311/python.exe /d/Python/Python311/python.exe)" || PY=""
-LD="$(dirname "$CC")/ld.exe"
-[ -x "$LD" ] || LD="$(command -v ld 2>/dev/null || echo ld)"
+
+[ -n "$PY" ] || { echo "找不到 python（阶段清单需要）" >&2; exit 1; }
+declare -A QF_STAGE_BUILD QF_STAGE_DEFINE QF_STAGE_ARCHIVE QF_STAGE_LIBS QF_STAGE_CXX
+eval "$("$PY" scripts/stages.py --bash)" || { echo "阶段清单解析失败" >&2; exit 1; }
 
 mkdir -p out dist
 rm -f out/stage-*.ok
 "$RUN" codegen/gen.ts > /dev/null
 
 # 各阶段自建；成功的打标记，标记决定链接时是否纳入该阶段。
-for s in cpp rust go csharp kotlin python js; do
+for s in "${QF_STAGES[@]}"; do
     case ",$SKIP," in *",$s,"*) echo "[skip] $s"; continue ;; esac
-    [ -x "stages/$s/build.sh" ] || continue
+    build_sh="${QF_STAGE_BUILD[$s]:-}"
+    [ -x "$build_sh" ] || continue
     echo "[build] $s"
-    if bash "stages/$s/build.sh"; then
+    if bash "$build_sh"; then
         touch "out/stage-$s.ok"
     else
         echo "[warn] $s 阶段构建失败，使用占位实现"
@@ -69,23 +66,18 @@ ARCHIVES=()
 LINK_FLAGS=()
 USE_CXX=0
 
-if [ -f out/stage-cpp.ok ]; then
-    ARCHIVES+=("stages/cpp/libqf_cpp.a"); DEFS+=(-DQF_HAVE_CPP); USE_CXX=1
-fi
-if [ -f out/stage-rust.ok ]; then
-    ARCHIVES+=("stages/rust/libqf_rust.a"); DEFS+=(-DQF_HAVE_RUST)
-    LIBS+=(-lsynchronization -luserenv)
-fi
-if [ -f out/stage-go.ok ]; then
-    ARCHIVES+=("stages/go/out/libqf_go.a"); DEFS+=(-DQF_HAVE_GO)
-    LIBS+=(-lws2_32 -lwinmm -lntdll)
-fi
-if [ -f out/stage-kotlin.ok ]; then
-    ARCHIVES+=("stages/kotlin/build/libqf_kt.a"); DEFS+=(-DQF_HAVE_KOTLIN)
-fi
-if [ -f out/stage-js.ok ]; then
-    ARCHIVES+=("stages/js/out/libqf_js.a"); DEFS+=(-DQF_HAVE_JAVASCRIPT)
-fi
+# 各阶段的归档、-D 宏与额外库全部来自清单（scripts/stages.py），这里不再列名。
+for s in "${QF_STAGES[@]}"; do
+    [ -f "out/stage-$s.ok" ] || continue
+    # C# 与 Python 的宏/库由 MSVC 侧就绪后才注入（见 P_DEFS），故这里跳过。
+    case "$s" in csharp|python) continue ;; esac
+    archive="${QF_STAGE_ARCHIVE[$s]:-}"
+    [ -n "$archive" ] || continue
+    ARCHIVES+=("$archive")
+    [ -n "${QF_STAGE_DEFINE[$s]:-}" ] && DEFS+=("-D${QF_STAGE_DEFINE[$s]:-}")
+    for lib in ${QF_STAGE_LIBS[$s]:-}; do LIBS+=("-l$lib"); done
+    [ "${QF_STAGE_CXX[$s]:-}" = "1" ] && USE_CXX=1
+done
 
 # ---------- MSVC 侧：C# NativeAOT 与静态 CPython ----------
 # 归一化后的归档/对象先攒在 P_* 里，全部成功才并入链接；中途失败就整体回退到
@@ -100,7 +92,7 @@ P_FLAGS=()
 
 prepare_msvc_side() {
     local PY AR OBJCOPY pair chkstk vs_root base aot aot_msys aot_win winstyle=0
-    PY="$(pick "${QF_PYTHON:-}" \
+    PY="$(qf_require "${QF_PYTHON:-}" \
               /mnt/d/Python/Python311/python.exe /d/Python/Python311/python.exe \
               "$(command -v python 2>/dev/null || true)" "$(command -v python3 2>/dev/null || true)")" \
         || { echo "找不到 python（coff_repack.py 需要）" >&2; return 1; }
@@ -112,10 +104,10 @@ prepare_msvc_side() {
     # ar/objcopy 必须和 gcc 同一套 binutils：PATH 里可能先撞上 WSL 的 ELF 版本。
     local cc_dir
     cc_dir="$(dirname "$CC")"
-    AR="$(pick "$cc_dir/ar.exe" "$cc_dir/ar" \
+    AR="$(qf_require "$cc_dir/ar.exe" "$cc_dir/ar" \
               /mnt/c/Strawberry/c/bin/ar.exe /c/Strawberry/c/bin/ar.exe)" \
         || { echo "找不到 ar" >&2; return 1; }
-    OBJCOPY="$(pick "$cc_dir/objcopy.exe" "$cc_dir/objcopy" \
+    OBJCOPY="$(qf_require "$cc_dir/objcopy.exe" "$cc_dir/objcopy" \
                    /mnt/c/Strawberry/c/bin/objcopy.exe /c/Strawberry/c/bin/objcopy.exe)" \
         || { echo "找不到 objcopy" >&2; return 1; }
 
@@ -166,7 +158,7 @@ prepare_msvc_side() {
 
     if [ -f out/stage-csharp.ok ]; then
         aot_msys=""
-        for base in "$HOME/.nuget/packages" /mnt/c/Users/Lenovo/.nuget/packages \
+        for base in "${HOME:-/nonexistent}/.nuget/packages" /mnt/c/Users/Lenovo/.nuget/packages \
                     /c/Users/Lenovo/.nuget/packages; do
             [ -d "$base" ] || continue
             aot_msys="$(ls -d "$base"/microsoft.netcore.app.runtime.nativeaot.win-x64/*/runtimes/win-x64/native 2>/dev/null | tail -1 || true)"
@@ -189,22 +181,26 @@ prepare_msvc_side() {
             repack "$aot" "$aot_msys/$aot.lib" || return 1
             P_LIBS+=("$MSVC_DIR/libs/$aot.a")
         done
-        P_DEFS+=(-DQF_HAVE_CSHARP)
-        P_LIBS_EXTRA+=(-lsynchronization -luserenv -lole32 -loleaut32 -luuid -lbcrypt)
+        P_DEFS+=("-D${QF_STAGE_DEFINE[csharp]:-QF_HAVE_CSHARP}")
+        for lib in ${QF_STAGE_LIBS[csharp]:-synchronization userenv ole32 oleaut32 uuid bcrypt}; do
+            P_LIBS_EXTRA+=("-l$lib")
+        done
     fi
 
     if [ -f out/stage-python.ok ]; then
-        P_SRC+=("stages/python/out/qf_py.obj" "stages/python/out/qf_py_frozen.obj")
-        P_DEFS+=(-DQF_HAVE_PYTHON)
+        P_SRC+=("stages/python/out/qf_py.obj" "stages/python/out/qf_py_diag.obj" "stages/python/out/qf_py_value.obj")
+        P_DEFS+=("-D${QF_STAGE_DEFINE[python]:-QF_HAVE_PYTHON}")
         repack python311 stages/python/out/python311.lib || return 1
         P_LIBS+=("$MSVC_DIR/libs/python311.a")
-        P_LIBS_EXTRA+=(-lucrtbase -lpathcch -lversion)
+        for lib in ${QF_STAGE_LIBS[python]:-ucrtbase pathcch version}; do
+            P_LIBS_EXTRA+=("-l$lib")
+        done
 
-        # 标准库载荷：Lib/ → zip → 作为二进制对象链入（qf_py.c 负责首次运行时释放）。
+        # 标准库载荷：Lib/ → zip → 作为只读二进制段链入，运行期由内存 finder 读取。
         if [ -n "$PY" ]; then
-            [ -f out/payload/lib.zip ] || "$PY" scripts/make_payload.py
-            ( cd out && "$LD" -r -b binary payload/lib.zip -o payload_blob.o )
-            P_SRC+=(out/payload_blob.o)
+            # zip 成员策略与"链入只读段"是同一条契约，统一由 make_payload.py 负责。
+            "$PY" scripts/make_payload.py --object
+            P_SRC+=(out/payload_blob.obj)
         else
             echo "[warn] 找不到 python，跳过标准库载荷" >&2
         fi
@@ -263,7 +259,8 @@ fi
 if [ "$DEPS" = "1" ]; then
     # 动态格：第三方运行库不内嵌进 exe，就必须随包分发到同目录，
     # 否则在没装 MinGW 的机器上加载器直接 0xC0000135。
-    for dll in libstdc++-6.dll libwinpthread-1.dll; do
+    # libgcc_s_seh-1.dll 是 libstdc++-6.dll 自己的依赖，一起发。
+    for dll in libstdc++-6.dll libwinpthread-1.dll libgcc_s_seh-1.dll; do
         src="$(dirname "$CC")/$dll"
         if [ ! -f "$src" ]; then
             src="$("$CC" -print-file-name="$dll" 2>/dev/null || true)"

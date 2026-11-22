@@ -2,16 +2,11 @@
 # C# 阶段构建：.NET 10 + NativeAOT 静态库 → stages/csharp/out/qf_cs.lib
 # 产物是纯原生静态库，宿主（MinGW/MSVC）负责最终链接，目标机不需要 .NET 运行时。
 set -euo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/env.sh"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-pick() {
-    for c in "$@"; do
-        if [ -n "$c" ] && [ -x "$c" ]; then printf '%s' "$c"; return 0; fi
-    done
-    return 1
-}
 
-DOTNET="$(pick "$(command -v dotnet 2>/dev/null || true)" \
+DOTNET="$(qf_require "$(command -v dotnet 2>/dev/null || true)" \
                 "/c/Program Files/dotnet/dotnet.exe" \
                 "/mnt/c/Program Files/dotnet/dotnet.exe")" \
     || { echo "找不到 dotnet（需要 .NET 10 SDK）" >&2; exit 1; }

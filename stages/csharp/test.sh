@@ -8,16 +8,11 @@
 #   因此这里先按 gcc 尝试两种链接方式；都失败时降级为「产物存在 + 导出符号齐全」，
 #   打印明确说明并返回 0。
 set -uo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/env.sh"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-pick() {
-    for c in "$@"; do
-        if [ -n "$c" ] && [ -x "$c" ]; then printf '%s' "$c"; return 0; fi
-    done
-    return 1
-}
 
-CC="$(pick "$(command -v gcc 2>/dev/null || true)" \
+CC="$(qf_require "$(command -v gcc 2>/dev/null || true)" \
             /c/Strawberry/c/bin/gcc.exe \
             /mnt/c/Strawberry/c/bin/gcc.exe)" \
     || { echo "找不到 gcc" >&2; exit 1; }

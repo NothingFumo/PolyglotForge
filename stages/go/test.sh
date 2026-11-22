@@ -1,19 +1,14 @@
 #!/usr/bin/env bash
 # Go 阶段自测：先构建 c-archive，再跑 Go 单元测试，最后用 C 程序走一遍真实 ABI。
 set -euo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/env.sh"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 dir="$root/stages/go"
 
-pick() {
-    for c in "$@"; do
-        if [ -n "$c" ] && [ -x "$c" ]; then printf '%s' "$c"; return 0; fi
-    done
-    return 1
-}
-GO="$(pick "$(command -v go 2>/dev/null || true)" /c/Go/bin/go.exe /mnt/c/Go/bin/go.exe \
+GO="$(qf_require "$(command -v go 2>/dev/null || true)" /c/Go/bin/go.exe /mnt/c/Go/bin/go.exe \
            /d/go/bin/go.exe /mnt/d/go/bin/go.exe)" \
     || { echo "找不到 go" >&2; exit 1; }
-CC="$(pick "$(command -v gcc 2>/dev/null || true)" \
+CC="$(qf_require "$(command -v gcc 2>/dev/null || true)" \
             /mnt/c/Strawberry/c/bin/gcc.exe /c/Strawberry/c/bin/gcc.exe)" \
     || { echo "找不到 gcc" >&2; exit 1; }
 

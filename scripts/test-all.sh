@@ -20,6 +20,12 @@ for s in c typescript cpp rust go csharp kotlin python js; do
     fi
 done
 
+printf '%-12s ' abi
+if bash tests/e2e/abi.sh > out/test-abi.log 2>&1; then echo ok; else echo FAIL; sed -n '1,15p' out/test-abi.log; fail=1; fi
+
+printf '%-12s ' portability
+if bash tests/e2e/portability.sh > out/test-portability.log 2>&1; then echo ok; else echo FAIL; sed -n '1,15p' out/test-portability.log; fail=1; fi
+
 if [ -f dist/queryforge.exe ] || [ -x dist/queryforge.exe ]; then
     printf '%-12s ' e2e
     if bash tests/e2e/run.sh > out/test-e2e.log 2>&1; then

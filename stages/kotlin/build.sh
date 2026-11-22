@@ -7,6 +7,7 @@
 # konanc/cinterop 是 Windows 批处理（JVM 工具），需要 JDK 17+；
 # 本机可能同时存在 MSYS bash 与 WSL bash，所以批处理一律经 cmd.exe 启动。
 set -euo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/env.sh"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 here="$root/stages/kotlin"
 cd "$root"
@@ -103,14 +104,27 @@ if [ ! -f "$ATOMICFU_KLIB" ]; then
 fi
 
 # Windows 批处理必须由 cmd.exe 解释；参数保持相对路径（cmd 继承仓库根的 Windows cwd）。
+# 参数不能直接拼给 `cmd /c`：一旦里面有引号或通配展开，cmd 会把它们当成新的
+# 命令行（实测 Git bash 下 "[kotlin]" 会被当命令执行）。落成临时 .bat 最稳。
 run_bat() {
     local bat="$1"
     shift
-    if command -v cmd.exe >/dev/null 2>&1; then
-        cmd.exe /c "$(to_win "$bat")" "$@"
-    else
+    if ! command -v cmd.exe >/dev/null 2>&1; then
         "$bat" "$@"
+        return $?
     fi
+    local tmp="stages/kotlin/build/run.$$.bat" a rc
+    {
+        printf '@echo off\r\n'
+        printf 'call "%s"' "$(to_win "$bat")"
+        for a in "$@"; do printf ' "%s"' "$a"; done
+        printf '\r\n'
+    } > "$tmp"
+    # MSYS/Git bash 会把 /c 当路径转成 C:/，cmd 于是无参数启动（打印版权）。
+    MSYS_NO_PATHCONV=1 cmd.exe /c "$(to_win "$tmp")"
+    rc=$?
+    rm -f "$tmp"
+    return $rc
 }
 
 echo "[kotlin] cinterop: contracts/qf.h + gen/qf_layout.h"
@@ -132,15 +146,9 @@ if [ ! -f "$here/build/libqf_kt.a" ]; then
 fi
 
 # Kotlin/Native 导出函数不支持结构体按值参数：shim.c 提供 qf_dsl_build 的 C 适配层。
-pick() {
-    for c in "$@"; do
-        if [ -n "$c" ] && [ -x "$c" ]; then printf '%s' "$c"; return 0; fi
-    done
-    return 1
-}
-CC="$(pick "$(command -v gcc 2>/dev/null || true)" /mnt/c/Strawberry/c/bin/gcc.exe /c/Strawberry/c/bin/gcc.exe)" \
+CC="$(qf_require "$(command -v gcc 2>/dev/null || true)" /mnt/c/Strawberry/c/bin/gcc.exe /c/Strawberry/c/bin/gcc.exe)" \
     || { echo "找不到 gcc（编译 C ABI 适配层需要）" >&2; exit 1; }
-AR="$(pick "$(command -v ar 2>/dev/null || true)" /mnt/c/Strawberry/c/bin/ar.exe /c/Strawberry/c/bin/ar.exe)" \
+AR="$(qf_require "$(command -v ar 2>/dev/null || true)" /mnt/c/Strawberry/c/bin/ar.exe /c/Strawberry/c/bin/ar.exe)" \
     || { echo "找不到 ar（合并 C ABI 适配层需要）" >&2; exit 1; }
 
 "$CC" -std=c11 -O2 -Igen -Icontracts -c stages/kotlin/shim.c -o stages/kotlin/build/qf_shim.o

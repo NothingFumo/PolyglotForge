@@ -2,18 +2,13 @@
 # JavaScript 阶段构建：编 QuickJS → libquickjs.a，再与 qf_js.c 合成 libqf_js.a。
 # 产物：stages/js/out/libquickjs.a、stages/js/out/libqf_js.a
 set -euo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/env.sh"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-pick() {
-    for c in "$@"; do
-        if [ -n "$c" ] && [ -x "$c" ]; then printf '%s' "$c"; return 0; fi
-    done
-    return 1
-}
 
-CC="$(pick "$(command -v gcc 2>/dev/null || true)" /mnt/c/Strawberry/c/bin/gcc.exe /c/Strawberry/c/bin/gcc.exe)" \
+CC="$(qf_require "$(command -v gcc 2>/dev/null || true)" /mnt/c/Strawberry/c/bin/gcc.exe /c/Strawberry/c/bin/gcc.exe)" \
     || { echo "找不到 gcc" >&2; exit 1; }
-AR="$(pick /mnt/c/Strawberry/c/bin/ar.exe /c/Strawberry/c/bin/ar.exe "$(command -v ar 2>/dev/null || true)")" \
+AR="$(qf_require /mnt/c/Strawberry/c/bin/ar.exe /c/Strawberry/c/bin/ar.exe "$(command -v ar 2>/dev/null || true)")" \
     || { echo "找不到 ar" >&2; exit 1; }
 
 cd "$root"
