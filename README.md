@@ -1,14 +1,15 @@
 # PolyglotForge
 
-多语言混合编译学习项目：九种语言各负责查询引擎的一段，最终链接成**一个**可执行文件。
-运行时不需要 Python、.NET、JVM 或 Node 环境。
+多语言混合编译学习项目：九种语言（C、C++、Rust、Go、C#、Kotlin、Python、JavaScript、
+TypeScript）分别承担解析、计划、扫描、求值、DSL、UDF、渲染与 codegen，最终链接成
+**一个**可执行文件。运行时不需要 Python、.NET、JVM 或 Node 环境。
 
 ## 产物
 
 | 文件 | 工具链 | CRT | 需要随包的 DLL |
 |---|---|---|---|
 | `dist/queryforge.exe` | gcc | 静态（libstdc++/libsupc++/libgcc/winpthread） | 无 |
-| `dist/queryforge-deps.exe` | gcc | 动态 | `libstdc++-6.dll`、`libwinpthread-1.dll` |
+| `dist/queryforge-deps.exe` | gcc | 动态 | `libstdc++-6.dll`、`libwinpthread-1.dll`、`libgcc_s_seh-1.dll` |
 | `dist/queryforge-all.exe` | MSVC `link.exe` | 动态 | `VCRUNTIME140.dll`、`VCRUNTIME140_1.dll` |
 | `dist/queryforge-static-msvc.exe` | MSVC `link.exe` | 静态（`/MT`） | 无 |
 
@@ -32,6 +33,8 @@ Visual Studio（含 C++ 工具集与 NativeAOT 运行时包）。换机器先跑
 `python scripts/env.py --check` 看哪项没探测到。缺失某个语言阶段时可用
 `bash scripts/build.sh --allow-missing` 继续，未就位的阶段由 `stages/stubs` 占位；
 两个 `.bat` 会在阶段归档缺失时自动调用 `scripts/produce.py` 补齐。
+注意：C# 是运行期唯一表达式求值器，缺它时产物仍可链接，但查询会在求值阶段返回
+`unsupported`。
 
 ## 运行
 
@@ -74,7 +77,8 @@ bash tests/e2e/portability.sh                         # 干净 PATH 启动 + 随
 `portability.sh` 会检查：动态产物需要的第三方 DLL 是否在 `dist/` 内（含 DLL 自身的依赖），
 静态产物的导入表里是否出现 `vcruntime`/`libstdc++`/`winpthread`，四个 exe 在仅有
 `C:\Windows\system32` 的 `PATH` 下能否输出结果，以及 Python UDF 运行后临时目录是否为空
-（零落盘）。`abi.sh` 用 `nm` 对比阶段归档的导出与 `contracts/qf.h` 的声明，拦"契约外入口"。
+（零落盘）；最后用同一组查询对比四个产物的输出，确认语义一致。
+`abi.sh` 用 `nm` 对比阶段归档的导出与 `contracts/qf.h` 的声明，拦"契约外入口"。
 
 ## SQL 子集
 
@@ -108,7 +112,7 @@ queryforge 实现的是单表查询子集，不是完整 SQL：
 
 标准库作为载荷内嵌，运行期不写临时文件：
 
-- `lib.zip`（`Lib/` 去掉 test/tkinter）用 `ld -r -b binary` 生成对象，再用
+- `lib.zip`（`Lib/` 去掉 test、idlelib、tkinter 等开发目录）用 `ld -r -b binary` 生成对象，再用
   `objcopy --rename-section .data=.rdata,alloc,load,readonly,...` 改成只读段；
 - 解释器初始化后把该段字节交给内嵌 zip finder（`_struct` 解析中央目录、`zlib` 解压、
   `compile`）；
