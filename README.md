@@ -85,6 +85,7 @@ queryforge 实现的是单表查询子集，不是完整 SQL：
 - **不支持**：`HAVING`、`SELECT *`、`JOIN`、子查询、多表、`DISTINCT`、窗口函数；
 - **表**始终是传入的那一个 CSV 文件；SQL 里的表名只用于诊断，不参与解析；
 - **ORDER BY** 只能引用输出列：`SELECT` 别名、输出列名或列序号（从 1 开始）；
+- **GROUP BY** 只能引用表列与表达式，不能引用 `SELECT` 别名；
 - **类型**只有整数 / 浮点 / 文本 / 空值四种；整数除法保持整数（与 sqlite 一致），
   除零结果为 `NULL`；
 - **空值**遵循 SQL 三值逻辑（`FALSE AND UNKNOWN = FALSE`、`TRUE OR UNKNOWN = TRUE`），
