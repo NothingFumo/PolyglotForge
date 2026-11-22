@@ -76,6 +76,20 @@ bash tests/e2e/portability.sh                         # 干净 PATH 启动 + 随
 `C:\Windows\system32` 的 `PATH` 下能否输出结果，以及 Python UDF 运行后临时目录是否为空
 （零落盘）。`abi.sh` 用 `nm` 对比阶段归档的导出与 `contracts/qf.h` 的声明，拦"契约外入口"。
 
+## SQL 子集
+
+queryforge 实现的是单表查询子集，不是完整 SQL：
+
+- **支持**：`SELECT` 表达式与 `AS` 别名、单表 `FROM`、`WHERE`、`GROUP BY`、
+  `count/sum/avg/min/max`、`ORDER BY`、`LIMIT`；
+- **不支持**：`HAVING`、`SELECT *`、`JOIN`、子查询、多表、`DISTINCT`、窗口函数；
+- **表**始终是传入的那一个 CSV 文件；SQL 里的表名只用于诊断，不参与解析；
+- **ORDER BY** 只能引用输出列：`SELECT` 别名、输出列名或列序号（从 1 开始）；
+- **类型**只有整数 / 浮点 / 文本 / 空值四种；整数除法保持整数（与 sqlite 一致），
+  除零结果为 `NULL`；
+- **空值**遵循 SQL 三值逻辑（`FALSE AND UNKNOWN = FALSE`、`TRUE OR UNKNOWN = TRUE`），
+  排序时无论升降序一律排在最后。
+
 ## 目录
 
 | 路径 | 内容 |
