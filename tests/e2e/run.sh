@@ -184,6 +184,13 @@ expect_error err_order 65 'ORDER BY 无法对应到输出列' \
     run_bin tests/e2e/data/users.csv "select name from t order by age" --raw
 expect_error err_opt 64 '未知选项' \
     run_bin tests/e2e/data/users.csv "select name from t" --nope
+expect_error err_udf 65 'udf exploded' \
+    run_bin tests/e2e/data/users.csv "select boom(age) as b from t" \
+    --plugin stages/python/fixtures/boom.py --raw
+expect_error err_udf_args 65 'UDF 参数过多' \
+    run_bin tests/e2e/data/users.csv \
+    "select boom(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17) as b from t" \
+    --plugin stages/python/fixtures/boom.py --raw
 
 # 表格渲染（JS 阶段）单独验证：默认输出必须含表头与行数汇总
 if run_bin tests/e2e/data/users.csv \

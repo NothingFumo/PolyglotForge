@@ -430,11 +430,39 @@ int main(void) {
               "列数不一致应写入诊断");
     }
 
+    /* 10. UDF 失败必须中止查询，而不是产出 NULL。 */
+    {
+        qf_value ude[2] = { t("Ann"), i64(30) };
+        qf_batch bu = {1, 2, ude};
+        memset(nodes, 0, sizeof nodes);
+        nodes[0].kind = QF_N_CALL;
+        nodes[0].name.ptr = "boom"; nodes[0].name.len = 4;
+        nodes[0].argc = 1; nodes[0].b = 1;
+        nodes[1].kind = QF_N_COL; nodes[1].a = 1; nodes[1].flags = QF_T_INT;
+        int32_t su[] = {0};
+        qf_ast astu;
+        memset(&astu, 0, sizeof astu);
+        astu.nodes = nodes; astu.node_count = 8;
+        astu.select = su; astu.select_count = 1;
+        astu.from_table.ptr = "t"; astu.from_table.len = 1;
+        astu.where_root = -1; astu.limit = -1;
+        outcols[0].name.ptr = "b"; outcols[0].name.len = 1; outcols[0].type = QF_T_NULL;
+        qf_schema osu = {1, outcols};
+        qf_result ru;
+        qf_diag ud;
+        memset(&ud, 0, sizeof ud);
+        memset(&ru, 0, sizeof ru);
+        rc = qf_engine_execute(&host, arena, &astu, &table, &osu, &bu, NULL, NULL, &ru, &ud);
+        CHECK(rc == QF_ERR_UDF, "UDF 失败应中止查询");
+        CHECK(ud.code == QF_ERR_UDF && ud.message.ptr != NULL && ud.message.len > 0,
+              "UDF 失败应带诊断");
+    }
+
     qf_arena_free(arena);
     if (failures) {
         printf("c stage FAILED (%d)\n", failures);
         return 1;
     }
-    printf("c stage OK: 分组/扩容/空聚合/过滤/排序/空值/三值逻辑/int64/整数除法/SUM 全部通过\n");
+    printf("c stage OK: 分组/扩容/空聚合/过滤/排序/空值/三值逻辑/int64/整数除法/SUM/UDF 失败 全部通过\n");
     return 0;
 }

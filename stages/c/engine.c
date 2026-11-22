@@ -20,6 +20,7 @@ typedef struct qf_engine_ctx {
     qf_arena* arena;
     const qf_ast* ast;
     const qf_schema* table;
+    qf_err err; /* 求值期间的粘性错误；非 OK 时中止整条查询 */
 } qf_engine_ctx;
 
 static qf_value v_null(void) {
@@ -85,11 +86,12 @@ static qf_err engine_fail(const qf_engine_ctx* c, qf_diag* diag, qf_err code,
     return code;
 }
 
-static qf_err uf_call(const qf_engine_ctx* c, const qf_node* n, const qf_value* row,
+static qf_err uf_call(qf_engine_ctx* c, const qf_node* n, const qf_value* row,
                       qf_value* out, qf_diag* diag);
 
 /* 求值：row 为输入列的值数组（可能为 NULL，仅当表达式不引用列时）。 */
-static qf_value eval(const qf_engine_ctx* c, int32_t idx, const qf_value* row, qf_diag* diag) {
+static qf_value eval(qf_engine_ctx* c, int32_t idx, const qf_value* row, qf_diag* diag) {
+    if (c->err != QF_ERR_OK) return v_null();
     const qf_node* n = &c->ast->nodes[idx];
     switch (n->kind) {
     case QF_N_LIT:
@@ -190,7 +192,14 @@ static qf_value eval(const qf_engine_ctx* c, int32_t idx, const qf_value* row, q
     }
     case QF_N_CALL: {
         qf_value out = v_null();
-        if (uf_call(c, n, row, &out, diag) != QF_ERR_OK) return v_null();
+        qf_err rc = uf_call(c, n, row, &out, diag);
+        if (rc != QF_ERR_OK) {
+            c->err = rc;
+            if (diag && diag->code == QF_ERR_OK) {
+                engine_fail(c, diag, rc, "UDF 执行失败");
+            }
+            return v_null();
+        }
         return out;
     }
     default:
@@ -198,24 +207,23 @@ static qf_value eval(const qf_engine_ctx* c, int32_t idx, const qf_value* row, q
     }
 }
 
-/* UDF：参数先求值，再交给 Python 阶段。 */
-static qf_err uf_call(const qf_engine_ctx* c, const qf_node* n, const qf_value* row,
+/* UDF：参数先求值，再交给 Python 阶段。失败向上传播，不再静默产出空值。 */
+static qf_err uf_call(qf_engine_ctx* c, const qf_node* n, const qf_value* row,
                       qf_value* out, qf_diag* diag) {
     if (n->argc > 16) {
-        diag->code = QF_ERR_UDF;
-        diag->message = c->host->str(c->host->ctx, "UDF 参数过多", 18);
-        return QF_ERR_UDF;
+        return engine_fail(c, diag, QF_ERR_UDF, "UDF 参数过多");
     }
     qf_value args[16];
-    for (int32_t i = 0; i < n->argc; ++i) args[i] = eval(c, n->b + i, row, diag);
+    for (int32_t i = 0; i < n->argc; ++i) {
+        args[i] = eval(c, n->b + i, row, diag);
+        if (c->err != QF_ERR_OK) return c->err;
+    }
 #ifdef QF_HAVE_PYTHON
     return qf_py_call(c->host, n->name, args, (uint32_t)n->argc, out, diag);
 #else
     (void)args;
     (void)out;
-    diag->code = QF_ERR_UDF;
-    diag->message = c->host->str(c->host->ctx, "构建未包含 Python 阶段", 26);
-    return QF_ERR_UDF;
+    return engine_fail(c, diag, QF_ERR_UDF, "构建未包含 Python 阶段");
 #endif
 }
 
@@ -315,7 +323,7 @@ static int select_has_agg(const qf_ast* ast) {
     return 0;
 }
 
-static qf_err row_keep(const qf_engine_ctx* c, const qf_batch* in, const qf_ast* ast,
+static qf_err row_keep(qf_engine_ctx* c, const qf_batch* in, const qf_ast* ast,
                        qf_filter_fn filter, void* fctx, uint8_t** out_keep, qf_diag* diag) {
     *out_keep = (uint8_t*)qf_arena_alloc(c->arena, in->rows ? in->rows : 1, 1);
     if (!*out_keep) return engine_fail(c, diag, QF_ERR_EXEC, "宿主分配过滤掩码失败");
@@ -332,6 +340,7 @@ static qf_err row_keep(const qf_engine_ctx* c, const qf_batch* in, const qf_ast*
     }
     for (uint32_t r = 0; r < in->rows; ++r) {
         qf_value v = eval(c, ast->where_root, &in->values[r * in->cols], diag);
+        if (c->err != QF_ERR_OK) return c->err;
         (*out_keep)[r] = (uint8_t)(truth(v) == 1);
     }
     return QF_ERR_OK;
@@ -440,6 +449,7 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
                 for (; k < ast->group_count; ++k) {
                     qf_value a = eval(&c, ast->group_by[k], row, diag);
                     qf_value b = eval(&c, ast->group_by[k], frow, diag);
+                    if (c.err != QF_ERR_OK) return c.err;
                     if (a.type != b.type) break;
                     if (a.type == QF_T_TEXT) {
                         if (str_cmp(a.as.s, b.as.s) != 0) break;
@@ -486,6 +496,7 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
                         for (; gk < ast->group_count; ++gk) {
                             qf_value a = eval(&c, ast->group_by[gk], row, diag);
                             qf_value b = eval(&c, ast->group_by[gk], first, diag);
+                            if (c.err != QF_ERR_OK) return c.err;
                             int same = (a.type == b.type) &&
                                        ((a.type == QF_T_TEXT && str_cmp(a.as.s, b.as.s) == 0) ||
                                         (a.type == QF_T_INT && a.as.i == b.as.i) ||
@@ -496,6 +507,7 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
                         if (gk != ast->group_count) continue;
                         if (n->argc > 0) {
                             qf_value arg = eval(&c, n->b, row, diag);
+                            if (c.err != QF_ERR_OK) return c.err;
                             agg_apply(&st, n->op, arg);
                         } else {
                             agg_apply(&st, n->op, v_int(1));
@@ -504,6 +516,7 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
                     v = agg_finish(&st, n->op);
                 } else {
                     v = eval(&c, ni, first, diag);
+                    if (c.err != QF_ERR_OK) return c.err;
                 }
                 out->values[(size_t)out->row_count * out_schema->count + si] = v;
             }
@@ -532,8 +545,9 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
             if (!keep[r]) continue;
             const qf_value* row = &in->values[(size_t)r * in->cols];
             for (uint32_t si = 0; si < ast->select_count; ++si) {
-                out->values[(size_t)out->row_count * out_schema->count + si] =
-                    eval(&c, ast->select[si], row, diag);
+                qf_value v = eval(&c, ast->select[si], row, diag);
+                if (c.err != QF_ERR_OK) return c.err;
+                out->values[(size_t)out->row_count * out_schema->count + si] = v;
             }
             out->row_count++;
         }
@@ -573,6 +587,7 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
         memcpy(out->values, tmp, sizeof(qf_value) * out_schema->count * n);
     }
 
+    if (c.err != QF_ERR_OK) return c.err;
     if (ast->limit >= 0 && (uint64_t)ast->limit < out->row_count) out->row_count = (uint64_t)ast->limit;
     return QF_ERR_OK;
 }

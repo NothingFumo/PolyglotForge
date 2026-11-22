@@ -7,7 +7,9 @@
 
 
 def score(row):
-    """整数入参：score(30) == 60。"""
+    """整数入参：score(30) == 60；空值原样返回（SQL 标量函数常见约定）。"""
+    if row is None:
+        return None
     return row * 2
 
 
