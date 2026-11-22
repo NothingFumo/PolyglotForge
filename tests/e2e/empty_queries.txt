@@ -1,0 +1,2 @@
+select count(*) as n from t
+select name as name from t

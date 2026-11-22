@@ -16,11 +16,11 @@ import sys
 sys.stdout.reconfigure(newline="\n")
 
 
-def infer(rows):
-    """按列推断类型：全整数→INTEGER，全数值→REAL，否则 TEXT；空串→NULL。"""
-    cols = len(rows[0])
+def infer(rows, width):
+    """按列推断类型：全整数→INTEGER，全数值→REAL，否则 TEXT；空串→NULL。
+    空表（只有表头）没有可推断的值，全部按 TEXT。"""
     types = []
-    for c in range(cols):
+    for c in range(width):
         vals = [r[c] for r in rows if r[c] != ""]
         if not vals:
             types.append("TEXT")
@@ -50,7 +50,7 @@ def main():
     with io.open(path, "r", encoding="utf-8", newline="") as f:
         rows = list(csv.reader(f))
     header, body = rows[0], rows[1:]
-    types = infer(body)
+    types = infer(body, len(header))
 
     con = sqlite3.connect(":memory:")
     decl = ", ".join('"%s" %s' % (name, t) for name, t in zip(header, types))

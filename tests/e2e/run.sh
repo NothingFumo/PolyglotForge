@@ -52,6 +52,138 @@ run_suite() {
 
 run_suite tests/e2e/data/users.csv  tests/e2e/queries.txt        users
 run_suite tests/e2e/data/groups.csv tests/e2e/groups_queries.txt groups
+run_suite tests/e2e/data/quoted.csv tests/e2e/quoted_queries.txt quoted
+run_suite tests/e2e/data/empty.csv  tests/e2e/empty_queries.txt  empty
+
+check_same() { # label fileA fileB
+    local label="$1" a="$2" b="$3"
+    total=$((total + 1))
+    if ! diff -u "$a" "$b" > "out/e2e/diff.$label.txt"; then
+        echo "$label 输出不一致"
+        sed -n '1,20p' "out/e2e/diff.$label.txt"
+        fail=1
+    fi
+}
+
+# --where（JS 沙箱）与等价 SQL 必须给出相同行
+if run_bin tests/e2e/data/users.csv "select name as name from t" \
+        --where "row.age > 30 && row.city !== 'SZ'" --raw \
+        > out/e2e/where_js.tsv 2> out/e2e/where_js.err; then
+    if run_bin tests/e2e/data/users.csv \
+            "select name as name from t where age > 30 and city <> 'SZ'" --raw \
+            > out/e2e/where_sql.tsv 2> out/e2e/where_sql.err; then
+        check_same where out/e2e/where_sql.tsv out/e2e/where_js.tsv
+    else
+        echo "--where 对照 SQL 执行失败"
+        sed -n '1,5p' out/e2e/where_sql.err
+        fail=1
+    fi
+else
+    echo "--where 执行失败"
+    sed -n '1,5p' out/e2e/where_js.err
+    fail=1
+fi
+
+# Kotlin DSL 与等价 SQL
+if run_bin tests/e2e/data/users.csv --dsl 'from("t"){select("name");limit(2)}' --raw \
+        > out/e2e/dsl.tsv 2> out/e2e/dsl.err; then
+    if run_bin tests/e2e/data/users.csv "select name as name from t limit 2" --raw \
+            > out/e2e/dsl_sql.tsv 2> out/e2e/dsl_sql.err; then
+        check_same dsl out/e2e/dsl_sql.tsv out/e2e/dsl.tsv
+    else
+        echo "DSL 对照 SQL 执行失败"
+        sed -n '1,5p' out/e2e/dsl_sql.err
+        fail=1
+    fi
+else
+    echo "Kotlin DSL 执行失败"
+    sed -n '1,5p' out/e2e/dsl.err
+    fail=1
+fi
+
+# Python UDF 与等价算术
+if run_bin tests/e2e/data/users.csv "select score(age) as s from t where age > 0" \
+        --plugin stages/python/fixtures/score.py --raw \
+        > out/e2e/udf.tsv 2> out/e2e/udf.err; then
+    if run_bin tests/e2e/data/users.csv "select age * 2 as s from t where age > 0" --raw \
+            > out/e2e/udf_sql.tsv 2> out/e2e/udf_sql.err; then
+        check_same udf out/e2e/udf_sql.tsv out/e2e/udf.tsv
+    else
+        echo "UDF 对照 SQL 执行失败"
+        sed -n '1,5p' out/e2e/udf_sql.err
+        fail=1
+    fi
+else
+    echo "Python UDF 执行失败"
+    sed -n '1,5p' out/e2e/udf.err
+    fail=1
+fi
+
+# 分片数不影响结果
+if run_bin tests/e2e/data/users.csv "select name as name from t order by name asc" \
+        --shards 1 --raw > out/e2e/shard1.tsv 2> out/e2e/shard1.err; then
+    if run_bin tests/e2e/data/users.csv "select name as name from t order by name asc" \
+            --shards 8 --raw > out/e2e/shard8.tsv 2> out/e2e/shard8.err; then
+        check_same shards out/e2e/shard1.tsv out/e2e/shard8.tsv
+    else
+        echo "--shards 8 执行失败"
+        sed -n '1,5p' out/e2e/shard8.err
+        fail=1
+    fi
+else
+    echo "--shards 1 执行失败"
+    sed -n '1,5p' out/e2e/shard1.err
+    fail=1
+fi
+
+# Kotlin 协程批处理：同一输入重复执行必须稳定
+if run_bin tests/e2e/data/users.csv "select count(*) as n from t" \
+        --batch "select count(*) from t;select name from t limit 2" \
+        > out/e2e/batch1.tsv 2> out/e2e/batch1.err; then
+    if run_bin tests/e2e/data/users.csv "select count(*) as n from t" \
+            --batch "select count(*) from t;select name from t limit 2" \
+            > out/e2e/batch2.tsv 2> out/e2e/batch2.err; then
+        check_same batch out/e2e/batch1.tsv out/e2e/batch2.tsv
+        grep -q '^query 1: 1 rows$' out/e2e/batch1.tsv || { echo "batch 第 1 条行数不符"; fail=1; }
+        grep -q '^query 2: 2 rows$' out/e2e/batch1.tsv || { echo "batch 第 2 条行数不符"; fail=1; }
+    else
+        echo "batch 第二次执行失败"
+        sed -n '1,5p' out/e2e/batch2.err
+        fail=1
+    fi
+else
+    echo "batch 执行失败"
+    sed -n '1,5p' out/e2e/batch1.err
+    fail=1
+fi
+
+# 错误路径：非零退出必须带可读诊断
+expect_error() { # label want_rc stderr_regex -- command...
+    local label="$1" want_rc="$2" want_err="$3"
+    shift 3
+    local err rc=0
+    err="$("$@" 2>&1 >/dev/null)" || rc=$?
+    total=$((total + 1))
+    if [ "$rc" -ne "$want_rc" ]; then
+        echo "$label: rc=$rc，期望 $want_rc"
+        fail=1
+    fi
+    if ! printf '%s' "$err" | grep -q "$want_err"; then
+        echo "$label: stderr 缺少 '$want_err'（实际：$(printf '%s' "$err" | head -1)）"
+        fail=1
+    fi
+}
+
+expect_error err_column 65 'error\[type\]: 表 t 中不存在列' \
+    run_bin tests/e2e/data/users.csv "select nope from t" --raw
+expect_error err_parse 65 'error\[parse\]' \
+    run_bin tests/e2e/data/users.csv "select from t" --raw
+expect_error err_type 65 '比较两侧类型不兼容' \
+    run_bin tests/e2e/data/users.csv "select name from t where name > 1" --raw
+expect_error err_order 65 'ORDER BY 无法对应到输出列' \
+    run_bin tests/e2e/data/users.csv "select name from t order by age" --raw
+expect_error err_opt 64 '未知选项' \
+    run_bin tests/e2e/data/users.csv "select name from t" --nope
 
 # 表格渲染（JS 阶段）单独验证：默认输出必须含表头与行数汇总
 if run_bin tests/e2e/data/users.csv \
