@@ -193,6 +193,51 @@ expect_error err_udf_args 65 'UDF 参数过多' \
     "select boom(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17) as b from t" \
     --plugin stages/python/fixtures/boom.py --raw
 
+# --explain 必须反映实际算子链，而不是固定模板
+explain_fail=0
+if run_bin tests/e2e/data/users.csv "select name as name from t where age > 30" \
+        --explain > out/e2e/explain_where.txt 2> out/e2e/explain_where.err; then
+    grep -qx 'Project (1 cols)' out/e2e/explain_where.txt || explain_fail=1
+    grep -qx '  Filter' out/e2e/explain_where.txt || explain_fail=1
+    grep -qx '    Scan t  (4 cols)' out/e2e/explain_where.txt || explain_fail=1
+    if grep -q '^Limit' out/e2e/explain_where.txt; then explain_fail=1; fi
+    if grep -q '^Sort' out/e2e/explain_where.txt; then explain_fail=1; fi
+else
+    echo "--explain（WHERE）执行失败"
+    sed -n '1,5p' out/e2e/explain_where.err
+    explain_fail=1
+fi
+
+if run_bin tests/e2e/data/users.csv "select name as name from t order by name asc limit 1" \
+        --explain > out/e2e/explain_sort.txt 2> out/e2e/explain_sort.err; then
+    grep -qx 'Limit 1' out/e2e/explain_sort.txt || explain_fail=1
+    grep -qx '  Sort (1 keys)' out/e2e/explain_sort.txt || explain_fail=1
+    grep -qx '    Project (1 cols)' out/e2e/explain_sort.txt || explain_fail=1
+    grep -qx '      Scan t  (4 cols)' out/e2e/explain_sort.txt || explain_fail=1
+else
+    echo "--explain（ORDER BY/LIMIT）执行失败"
+    sed -n '1,5p' out/e2e/explain_sort.err
+    explain_fail=1
+fi
+
+if run_bin tests/e2e/data/users.csv "select city as city, count(*) as n from t group by city" \
+        --explain > out/e2e/explain_group.txt 2> out/e2e/explain_group.err; then
+    grep -qx 'Project (2 cols)' out/e2e/explain_group.txt || explain_fail=1
+    grep -qx '  Aggregate (1 groups)' out/e2e/explain_group.txt || explain_fail=1
+    grep -qx '    Scan t  (4 cols)' out/e2e/explain_group.txt || explain_fail=1
+    if grep -q 'Filter' out/e2e/explain_group.txt; then explain_fail=1; fi
+else
+    echo "--explain（GROUP BY）执行失败"
+    sed -n '1,5p' out/e2e/explain_group.err
+    explain_fail=1
+fi
+
+if [ "$explain_fail" -ne 0 ]; then
+    echo "--explain 输出与算子链不一致"
+    fail=1
+fi
+total=$((total + 3))
+
 # 表格渲染（JS 阶段）单独验证：默认输出必须含表头与行数汇总
 if run_bin tests/e2e/data/users.csv \
         "select name as name, age as age from t" > out/e2e/table.txt 2> out/e2e/table.err; then

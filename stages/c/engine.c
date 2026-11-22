@@ -605,19 +605,52 @@ static void append(qf_arena* a, qf_str* s, const char* text) {
     s->len += n;
 }
 
+/* 计划行：按 depth 缩进两格，逐行追加。 */
+static void append_line(qf_arena* a, qf_str* s, uint32_t depth, const char* text) {
+    char pad[65];
+    uint32_t n = depth * 2;
+    if (n > sizeof pad - 1) n = sizeof pad - 1;
+    memset(pad, ' ', n);
+    pad[n] = '\0';
+    append(a, s, pad);
+    append(a, s, text);
+    append(a, s, "\n");
+}
+
 qf_err qf_engine_explain(const qf_host* host, qf_arena* arena, const qf_ast* ast,
                          const qf_schema* table, qf_str* out, qf_diag* diag) {
     (void)host;
     (void)diag;
     qf_str s = {NULL, 0};
-    append(arena, &s, "Limit\n  Sort\n    Project\n");
-    if (ast->group_count > 0 || select_has_agg(ast)) append(arena, &s, "      Aggregate\n");
-    if (ast->where_root >= 0) append(arena, &s, "        Filter\n");
-    char line[160];
-    snprintf(line, sizeof line, "          Scan %.*s  (%u cols)\n",
-             (int)ast->from_table.len, ast->from_table.ptr ? ast->from_table.ptr : "?",
+    uint32_t depth = 0;
+    char line[256];
+
+    if (ast->limit >= 0) {
+        snprintf(line, sizeof line, "Limit %lld", (long long)ast->limit);
+        append_line(arena, &s, depth++, line);
+    }
+    if (ast->order_count > 0) {
+        snprintf(line, sizeof line, "Sort (%u keys)", ast->order_count);
+        append_line(arena, &s, depth++, line);
+    }
+    snprintf(line, sizeof line, "Project (%u cols)", ast->select_count);
+    append_line(arena, &s, depth++, line);
+    if (ast->group_count > 0 || select_has_agg(ast)) {
+        if (ast->group_count > 0) {
+            snprintf(line, sizeof line, "Aggregate (%u groups)", ast->group_count);
+        } else {
+            snprintf(line, sizeof line, "Aggregate");
+        }
+        append_line(arena, &s, depth++, line);
+    }
+    if (ast->where_root >= 0) {
+        append_line(arena, &s, depth++, "Filter");
+    }
+    snprintf(line, sizeof line, "Scan %.*s  (%u cols)",
+             (int)ast->from_table.len,
+             ast->from_table.ptr ? ast->from_table.ptr : "?",
              table ? table->count : 0);
-    append(arena, &s, line);
+    append_line(arena, &s, depth, line);
     *out = s;
     return QF_ERR_OK;
 }
