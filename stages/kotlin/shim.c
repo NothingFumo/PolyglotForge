@@ -8,9 +8,31 @@
  */
 #include "qf.h"
 
+#include <string.h>
+
 qf_err qf_dsl_build_impl(const qf_host* host, const char* src, uint32_t len,
                          qf_ast** out, qf_diag* diag);
 
+/* 宿主前置条件在 C 侧统一判定：缺 alloc/str 时返回错误码，而不是让 Kotlin 的
+   IllegalStateException 穿过 FFI 变成进程终止。诊断文本用静态字面量，
+   因为此路径上 host->str 不可用。 */
+static qf_err qf_host_gate(const qf_host* host, qf_diag* diag) {
+    if (host && host->alloc && host->str) return QF_ERR_OK;
+    if (diag) {
+        static const char msg[] = "host 缺少 alloc/str 服务";
+        diag->code = QF_ERR_ARG;
+        diag->line = 0;
+        diag->col = 0;
+        diag->message.ptr = msg;
+        diag->message.len = (uint32_t)(sizeof(msg) - 1);
+        diag->hint.ptr = NULL;
+        diag->hint.len = 0;
+    }
+    return QF_ERR_ARG;
+}
+
 qf_err qf_dsl_build(const qf_host* host, qf_str src, qf_ast** out, qf_diag* diag) {
+    qf_err gate = qf_host_gate(host, diag);
+    if (gate != QF_ERR_OK) return gate;
     return qf_dsl_build_impl(host, src.ptr, src.len, out, diag);
 }

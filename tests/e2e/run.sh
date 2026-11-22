@@ -2,16 +2,11 @@
 # 端到端验收：同一批 SQL 分别交给 queryforge 与 Python 标准库 sqlite3，
 # 逐字节比较 --raw 输出。sqlite3 是唯一可得的权威对照实现（零第三方依赖）。
 set -euo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/env.sh"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
 
-pick() {
-    for c in "$@"; do
-        if [ -n "$c" ] && [ -x "$c" ]; then printf '%s' "$c"; return 0; fi
-    done
-    return 1
-}
-PY="$(pick "$(command -v python 2>/dev/null || true)" "$(command -v python3 2>/dev/null || true)" \
+PY="$(qf_require "$(command -v python 2>/dev/null || true)" "$(command -v python3 2>/dev/null || true)" \
            "D:/Python/Python311/python.exe" /mnt/d/Python/Python311/python.exe /d/Python/Python311/python.exe)" \
      || { echo "找不到 python" >&2; exit 1; }
 

@@ -16,12 +16,6 @@
 
 qf_host qf_host_make(qf_arena* a);
 
-/* stages/js 的扩展入口（stages/js/qf_js_ext.h）。qf_batch 不带列名，
-   按真实列名求值必须把表结构一起交给 JS 沙箱；这里只做局部声明，
-   免得为一个内部扩展去动 contracts/qf.h。 */
-qf_err qf_js_where_named(const qf_host* host, qf_str expr, const qf_schema* cols,
-                         const qf_batch* batch, uint8_t* keep, qf_diag* diag);
-
 static const char* err_name(qf_err e) {
     switch (e) {
     case QF_ERR_OK: return "ok";

@@ -43,7 +43,9 @@ internal class HostRef(val host: CPointer<qf_host>) {
     }
 
     fun str(value: String): CValue<qf_str> {
-        val fn = h.str ?: throw IllegalStateException("宿主没有提供 str 服务")
+        // 缺 str 时返回空串而不是抛异常：异常穿过 C ABI 会变成进程终止。
+        // 入口已由 shim.c 的 qf_host_gate 拦截，这里只是最后一道防线。
+        val fn = h.str ?: return cValue { ptr = null; len = 0u }
         val bytes = value.encodeToByteArray()
         return memScoped {
             val buf = allocArray<ByteVar>(bytes.size + 1)

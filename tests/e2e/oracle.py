@@ -12,6 +12,9 @@ import io
 import sqlite3
 import sys
 
+# 输出统一用 LF：宿主 exe 也是 LF，逐字节比较才有意义。
+sys.stdout.reconfigure(newline="\n")
+
 
 def infer(rows):
     """按列推断类型：全整数→INTEGER，全数值→REAL，否则 TEXT；空串→NULL。"""

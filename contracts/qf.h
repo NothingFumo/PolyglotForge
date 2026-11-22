@@ -131,6 +131,11 @@ qf_err qf_js_format(const qf_host* host, const qf_result* result, qf_str* out, q
 qf_err qf_js_where(const qf_host* host, qf_str expr, const qf_batch* batch,
                    uint8_t* keep, qf_diag* diag);
 
+/* 命名变体：qf_batch 不带列名，按真实列名求值（row.age > 30）必须把表结构
+   一起交给沙箱。qf_js_where 内部以 c0..cN 调它。 */
+qf_err qf_js_where_named(const qf_host* host, qf_str expr, const qf_schema* cols,
+                         const qf_batch* batch, uint8_t* keep, qf_diag* diag);
+
 /* ---------- 宿主 ---------- */
 
 uint32_t qf_abi_version(void);

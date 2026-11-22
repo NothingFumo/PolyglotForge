@@ -8,7 +8,6 @@
  *   3. 跨边界只传 JSON 文本，不把宿主指针暴露给脚本。
  */
 #include "qf.h"
-#include "qf_js_ext.h"
 #include "quickjs.h"
 
 #include <math.h>

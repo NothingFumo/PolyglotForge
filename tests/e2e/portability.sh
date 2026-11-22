@@ -1,43 +1,80 @@
 #!/usr/bin/env bash
-# 产物的运行时可移植性检查：清空 PATH（只留系统目录），逐个启动产物。
-# 动态链接产物必须自带第三方 DLL；静态链接产物不得依赖任何非系统 DLL。
+# 产物可移植性：干净 PATH 下逐个启动；动态产物必须随包第三方 DLL，
+# 静态产物不得引用任何非系统 DLL；Python UDF 必须零落盘。
 set -uo pipefail
-cd "$(dirname "$0")/../.."
-CLEAN_PATH="/c/Windows/system32:/c/Windows"
+. "$(cd "$(dirname "$0")/../.." && pwd)/tests/lib.sh"
+cd "$qf_lib_root"
+CLEAN_PATH="$(qf_clean_path)"
 TIMEOUT="$(command -v timeout || true)"
 fail=0
 
-run_artifact() {
-    local exe="$1" need="$2"
-    [ -f "$exe" ] || { printf '%-34s 跳过（未构建）\n' "$(basename "$exe")"; return 0; }
-    local out
-    out=$(PATH="$CLEAN_PATH" ${TIMEOUT:+"$TIMEOUT"} 40 "$exe" tests/e2e/data/users.csv "select 1 as x from t limit 1" --raw 2>&1)
-    local rc=$?
-    if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q '^x$'; then
-        printf '%-34s 干净 PATH 可运行（%s）\n' "$(basename "$exe")" "$need"
-    else
-        printf '%-34s 失败 rc=%s：%s\n' "$(basename "$exe")" "$rc" "$(printf '%s' "$out" | head -1)"
-        fail=1
-    fi
+run_clean() {
+    local exe="$1"; shift
+    PATH="$CLEAN_PATH" ${TIMEOUT:+"$TIMEOUT"} 60 "$exe" "$@" 2>&1
 }
 
-echo "== 动态链接产物：第三方 DLL 必须随包 =="
-for d in libstdc++-6.dll libwinpthread-1.dll vcruntime140.dll vcruntime140_1.dll; do
-    if [ -f "dist/$d" ]; then printf '  dist/%-26s 存在\n' "$d"; else printf '  dist/%-26s 缺失\n' "$d"; fi
+for art in "${QF_ARTIFACTS[@]}"; do
+    name="$(basename "$art")"
+    if ! qf_have_artifact "$art"; then qf_report "$name" "跳过（未构建）"; continue; fi
+    out="$(run_clean "$art" tests/e2e/data/users.csv "select 1 as x from t limit 1" --raw)"
+    rc=$?
+    if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q '^x$'; then
+        qf_report "$name" "干净 PATH 可运行"
+    else
+        qf_report "$name" "失败 rc=$rc: $(printf '%s' "$out" | head -1)"
+        fail=1
+    fi
+    deps="$(qf_third_party_deps "$art")"
+    kind="$(qf_artifact_kind "$art")"
+    if [ -n "$deps" ]; then
+        if [ "$kind" = "static" ]; then
+            # 静态产物的承诺是"零第三方 DLL"，引用了就是失败，与 dist/ 里有没有同名文件无关。
+            qf_report "$name" "静态产物引用了第三方 DLL: $(printf '%s' "$deps" | tr '\n' ' ')"
+            fail=1
+        fi
+        for d in $deps; do
+            [ -f "dist/$d" ] || { qf_report "$name" "缺少随包 DLL: $d"; fail=1; }
+        done
+    else
+        qf_report "$name" "第三方 DLL 引用=0"
+    fi
 done
-run_artifact dist/queryforge-deps.exe "libstdc++-6/winpthread 随包"
-run_artifact dist/queryforge-all.exe  "vcruntime140 随包"
 
-echo "== 静态链接产物：不得依赖非系统 DLL =="
-for exe in dist/queryforge.exe dist/queryforge-static-msvc.exe; do
-    [ -f "$exe" ] || continue
-    bad=$(objdump -p "$exe" 2>/dev/null | grep "DLL Name" | awk '{print $3}' \
-          | grep -icE "vcruntime|libstdc|winpthread")
-    printf '  %-34s 非系统 DLL 引用=%s\n' "$(basename "$exe")" "$bad"
-    [ "$bad" -eq 0 ] || fail=1
+echo "== 随包 DLL 的依赖闭合 =="
+for so in dist/*.dll; do
+    [ -f "$so" ] || continue
+    for dep in $(objdump -p "$so" 2>/dev/null | awk '/DLL Name/{print $3}'); do
+        case "$dep" in
+            KERNEL32.dll|USER32.dll|ADVAPI32.dll|WS2_32.dll|ole32.dll|oleaut32.dll|uuid.dll|\
+            bcrypt.dll|ntdll.dll|VERSION.dll|USERENV.dll|pathcch.dll|synchronization.dll|\
+            userenv.dll|api-ms-win-*|ucrtbase.dll|msvcrt.dll) continue ;;
+        esac
+        [ -f "dist/$dep" ] || { qf_report "$(basename "$so")" "缺少依赖 $dep"; fail=1; }
+    done
 done
-run_artifact dist/queryforge.exe "零第三方 DLL"
-run_artifact dist/queryforge-static-msvc.exe "零第三方 DLL"
 
-[ $fail -eq 0 ] && echo "portability: 4/4 通过" || echo "portability: 有失败项"
-exit $fail
+echo "== Python UDF 零落盘 =="
+if ! qf_have_artifact dist/queryforge.exe; then
+    qf_report queryforge.exe "跳过（未构建）"
+    zd=""
+else
+zd="$qf_lib_root/out/zd.$$"
+mkdir -p "$zd"
+zdw="$(winpath "$zd" 2>/dev/null || printf '%s' "$zd")"
+if out="$(LOCALAPPDATA="$zdw" TEMP="$zdw" TMP="$zdw" \
+        PATH="$CLEAN_PATH" ${TIMEOUT:+"$TIMEOUT"} 60 dist/queryforge.exe \
+        tests/e2e/data/users.csv "select score(age) as s from t limit 2" \
+        --plugin stages/python/fixtures/score.py --raw 2>&1)"; then
+    n="$(find "$zd" -type f 2>/dev/null | wc -l)"
+    if [ "$n" -eq 0 ]; then qf_report "queryforge.exe" "UDF 运行后临时目录为空"; else
+        qf_report "queryforge.exe" "写入 $n 个文件"; fail=1
+    fi
+else
+    qf_report "queryforge.exe" "UDF 失败"
+    fail=1
+fi
+fi
+[ -n "$zd" ] && rm -rf "$zd"
+
+qf_summary "$fail" portability
+exit "$fail"

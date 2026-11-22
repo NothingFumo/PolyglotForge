@@ -3,7 +3,6 @@
  * 只依赖 stages/js/out/libqf_js.a（含 QuickJS）与 contracts/qf.h。
  */
 #include "qf.h"
-#include "qf_js_ext.h"
 
 #include <stdio.h>
 #include <stdlib.h>
