@@ -575,7 +575,7 @@ impl Planner {
                         }
                         if lt == QF_T_NULL || rt == QF_T_NULL {
                             QF_T_NULL
-                        } else if lt == QF_T_INT && rt == QF_T_INT && n.op != QF_OP_DIV {
+                        } else if lt == QF_T_INT && rt == QF_T_INT {
                             QF_T_INT
                         } else {
                             QF_T_DOUBLE
@@ -683,10 +683,9 @@ impl Planner {
                                 "先确认参数列是整数或浮点列",
                             ));
                         }
-                        // 策略：sum 与 avg 一律声明为 double。
-                        // C 引擎的 agg_finish 对 sum 恒返回 double（见 stages/c/engine.c），
-                        // 声明成 int 会让 schema 与运行期值的类型不一致。
-                        QF_T_DOUBLE
+                        // sum 保持参数类型：整数输入输出整数，浮点输入输出浮点，
+                        // 与 C 引擎的 agg_finish 及 sqlite 一致；avg 恒为 double。
+                        if n.op == QF_AGG_AVG { QF_T_DOUBLE } else { at }
                     }
                     QF_AGG_MIN | QF_AGG_MAX => {
                         if n.argc != 1 {
@@ -1486,12 +1485,12 @@ mod tests {
         assert_eq!(
             f.out_types(),
             vec![
-                QF_T_INT,
-                QF_T_DOUBLE,
-                QF_T_DOUBLE,
-                QF_T_INT,
-                QF_T_DOUBLE,
-                QF_T_DOUBLE
+                QF_T_INT,    // count
+                QF_T_DOUBLE, // avg(age)
+                QF_T_INT,    // sum(age)：整数输入保持整数
+                QF_T_INT,    // min(age)
+                QF_T_DOUBLE, // max(score)
+                QF_T_DOUBLE  // avg(score)
             ]
         );
     }

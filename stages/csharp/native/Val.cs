@@ -128,7 +128,7 @@ internal sealed class Val
         return r ? True : False;
     }
 
-    /// <summary>算术：未知传播，整数运算保持 int64，除法一律提升为浮点。</summary>
+    /// <summary>算术：未知传播，整数运算保持 int64（含除法），与 C 引擎同步。</summary>
     public static Val Arith(int op, Val a, Val b)
     {
         if (a.Kind == KNull || b.Kind == KNull) return Null;
@@ -141,8 +141,14 @@ internal sealed class Val
             case QfOp.Add: return Int(unchecked(a.I + b.I));
             case QfOp.Sub: return Int(unchecked(a.I - b.I));
             case QfOp.Mul: return Int(unchecked(a.I * b.I));
-            case QfOp.Mod: return b.I == 0 ? Null : Int(a.I % b.I);
-            case QfOp.Div: break; // 整数除法也提升成浮点，与 C 引擎一致
+            case QfOp.Div:
+                if (b.I == 0) return Null;
+                if (a.I == long.MinValue && b.I == -1) return Int(long.MinValue);
+                return Int(a.I / b.I); // 整数除法保持整数，与 sqlite 一致
+            case QfOp.Mod:
+                if (b.I == 0) return Null;
+                if (a.I == long.MinValue && b.I == -1) return Int(0);
+                return Int(a.I % b.I);
             default: return Null;
             }
         }

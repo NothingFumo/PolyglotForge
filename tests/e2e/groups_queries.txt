@@ -1,0 +1,1 @@
+select g as g, count(*) as n from t group by g order by g asc

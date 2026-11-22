@@ -24,24 +24,34 @@ run_bin() {
 }
 
 fail=0
-i=0
-while IFS= read -r sql; do
-    [ -z "$sql" ] && continue
-    i=$((i + 1))
-    if ! run_bin tests/e2e/data/users.csv "$sql" --raw \
-            > "out/e2e/got.$i.tsv" 2> "out/e2e/got.$i.err"; then
-        echo "query $i 执行失败: $sql"
-        sed -n '1,5p' "out/e2e/got.$i.err"
-        fail=1
-        continue
-    fi
-    "$PY" tests/e2e/oracle.py tests/e2e/data/users.csv "$sql" > "out/e2e/exp.$i.tsv"
-    if ! diff -u "out/e2e/exp.$i.tsv" "out/e2e/got.$i.tsv" > "out/e2e/diff.$i.txt"; then
-        echo "query $i 与 sqlite3 不一致: $sql"
-        sed -n '1,20p' "out/e2e/diff.$i.txt"
-        fail=1
-    fi
-done < tests/e2e/queries.txt
+total=0
+
+run_suite() {
+    local csv="$1" qfile="$2" prefix="$3"
+    local i=0
+    while IFS= read -r sql; do
+        [ -z "$sql" ] && continue
+        i=$((i + 1))
+        total=$((total + 1))
+        if ! run_bin "$csv" "$sql" --raw \
+                > "out/e2e/got.$prefix.$i.tsv" 2> "out/e2e/got.$prefix.$i.err"; then
+            echo "query $prefix#$i 执行失败: $sql"
+            sed -n '1,5p' "out/e2e/got.$prefix.$i.err"
+            fail=1
+            continue
+        fi
+        "$PY" tests/e2e/oracle.py "$csv" "$sql" > "out/e2e/exp.$prefix.$i.tsv"
+        if ! diff -u "out/e2e/exp.$prefix.$i.tsv" "out/e2e/got.$prefix.$i.tsv" \
+                > "out/e2e/diff.$prefix.$i.txt"; then
+            echo "query $prefix#$i 与 sqlite3 不一致: $sql"
+            sed -n '1,20p' "out/e2e/diff.$prefix.$i.txt"
+            fail=1
+        fi
+    done < "$qfile"
+}
+
+run_suite tests/e2e/data/users.csv  tests/e2e/queries.txt        users
+run_suite tests/e2e/data/groups.csv tests/e2e/groups_queries.txt groups
 
 # 表格渲染（JS 阶段）单独验证：默认输出必须含表头与行数汇总
 if run_bin tests/e2e/data/users.csv \
@@ -54,5 +64,5 @@ else
     fail=1
 fi
 
-echo "e2e: $i 条查询, fail=$fail"
+echo "e2e: $total 条查询, fail=$fail"
 exit "$fail"

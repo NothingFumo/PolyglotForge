@@ -4,3 +4,10 @@ select name as name from t order by name asc limit 3
 select count(*) as n from t
 select sum(age) as s, avg(age) as a from t
 select name as name, age as age from t where city = 'SH' order by age desc
+select name as name, (age > 100 or city = 'BJ') as x from t where age > 100 or city = 'BJ'
+select name as name, (age = age and age > 100) as x from t
+select name as name, age / 2 as half from t order by name asc
+select name as name from t where age / 2 = 17
+select count(age) as n from t
+select count(*) as n from t where age > 1000
+select sum(age) as s from t where age > 1000
