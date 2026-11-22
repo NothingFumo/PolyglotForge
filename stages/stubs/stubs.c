@@ -94,4 +94,9 @@ qf_err qf_js_where(const qf_host* host, qf_str expr, const qf_batch* batch,
     (void)host; (void)expr; (void)batch; (void)keep;
     return unsupported(diag, "缺少 JavaScript 阶段", 22);
 }
+qf_err qf_js_where_named(const qf_host* host, qf_str expr, const qf_schema* cols,
+                         const qf_batch* batch, uint8_t* keep, qf_diag* diag) {
+    (void)host; (void)expr; (void)cols; (void)batch; (void)keep;
+    return unsupported(diag, "缺少 JavaScript 阶段", 22);
+}
 #endif

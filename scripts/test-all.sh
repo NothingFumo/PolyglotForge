@@ -7,7 +7,13 @@ mkdir -p out
 . scripts/env.sh
 
 fail=0
-for s in c typescript cpp rust go csharp kotlin python js; do
+PY="$(qf_require_python)" || { echo "找不到 python（阶段清单需要）" >&2; exit 1; }
+if ! clist="$("$PY" scripts/stages.py --list)"; then
+    echo "阶段清单读取失败" >&2
+    exit 1
+fi
+# c 宿主与 typescript codegen 不是链接阶段，清单不列，单独保留。
+for s in c typescript $clist; do
     if [ -x "stages/$s/test.sh" ]; then
         printf '%-12s ' "$s"
         if bash "stages/$s/test.sh" > "out/test-$s.log" 2>&1; then
