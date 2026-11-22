@@ -27,15 +27,13 @@ root="$PWD"
 # shellcheck source=/dev/null
 . scripts/env.sh
 
-CC="$(qf_require "$(command -v gcc 2>/dev/null || true)" /mnt/c/Strawberry/c/bin/gcc.exe /c/Strawberry/c/bin/gcc.exe)" \
+CC="$(qf_require "$(command -v gcc 2>/dev/null || true)" /c/Strawberry/c/bin/gcc.exe)" \
     || { echo "找不到 gcc" >&2; exit 1; }
-CXX="$(qf_require "$(command -v g++ 2>/dev/null || true)" /mnt/c/Strawberry/c/bin/g++.exe /c/Strawberry/c/bin/g++.exe)" \
+CXX="$(qf_require "$(command -v g++ 2>/dev/null || true)" /c/Strawberry/c/bin/g++.exe)" \
     || { echo "找不到 g++" >&2; exit 1; }
 RUN="$(qf_require "$(command -v bun 2>/dev/null || true)" "$(command -v node 2>/dev/null || true)" \
-            /mnt/c/Users/Lenovo/.bun/bin/bun.exe /c/Users/Lenovo/.bun/bin/bun.exe \
-            /mnt/d/nodejs/node.exe /d/nodejs/node.exe)" || { echo "找不到 bun 或 node" >&2; exit 1; }
-PY="$(qf_require "$(command -v python 2>/dev/null || true)" "$(command -v python3 2>/dev/null || true)" \
-           /mnt/d/Python/Python311/python.exe /d/Python/Python311/python.exe)" || PY=""
+            "$HOME/.bun/bin/bun.exe" /d/nodejs/node.exe)" || { echo "找不到 bun 或 node" >&2; exit 1; }
+PY="$(qf_require "$(command -v python 2>/dev/null || true)" "$(command -v python3 2>/dev/null || true)")" || PY=""
 
 [ -n "$PY" ] || { echo "找不到 python（阶段清单需要）" >&2; exit 1; }
 declare -A QF_STAGE_BUILD QF_STAGE_DEFINE QF_STAGE_ARCHIVE QF_STAGE_LIBS QF_STAGE_CXX
@@ -93,7 +91,6 @@ P_FLAGS=()
 prepare_msvc_side() {
     local PY AR OBJCOPY pair chkstk vs_root base aot aot_msys aot_win winstyle=0
     PY="$(qf_require "${QF_PYTHON:-}" \
-              /mnt/d/Python/Python311/python.exe /d/Python/Python311/python.exe \
               "$(command -v python 2>/dev/null || true)" "$(command -v python3 2>/dev/null || true)")" \
         || { echo "找不到 python（coff_repack.py 需要）" >&2; return 1; }
     # Windows 版 python 只认 C:/...，WSL/Debian 版只认 /mnt/c/...；按实际解释器选路径风格。
@@ -105,10 +102,10 @@ prepare_msvc_side() {
     local cc_dir
     cc_dir="$(dirname "$CC")"
     AR="$(qf_require "$cc_dir/ar.exe" "$cc_dir/ar" \
-              /mnt/c/Strawberry/c/bin/ar.exe /c/Strawberry/c/bin/ar.exe)" \
+              /c/Strawberry/c/bin/ar.exe)" \
         || { echo "找不到 ar" >&2; return 1; }
     OBJCOPY="$(qf_require "$cc_dir/objcopy.exe" "$cc_dir/objcopy" \
-                   /mnt/c/Strawberry/c/bin/objcopy.exe /c/Strawberry/c/bin/objcopy.exe)" \
+                   /c/Strawberry/c/bin/objcopy.exe)" \
         || { echo "找不到 objcopy" >&2; return 1; }
 
     rm -rf "$MSVC_DIR"
@@ -144,8 +141,8 @@ prepare_msvc_side() {
     # __chkstk：优先用 MSVC 自己的探测函数；找不到就别名到 mingw 的 ___chkstk_ms
     # （两者都是 ABI 规定的“RAX=帧大小、逐页触碰保护页”实现）。
     chkstk=""
-    for vs_root in "/mnt/d/Microsoft Visual Studio" "/d/Microsoft Visual Studio" \
-                   "D:/Microsoft Visual Studio" "/mnt/c/Program Files/Microsoft Visual Studio"; do
+    for vs_root in "/d/Microsoft Visual Studio" "D:/Microsoft Visual Studio" \
+                   "/c/Program Files/Microsoft Visual Studio"; do
         [ -d "$vs_root" ] || continue
         chkstk="$(ls -d "$vs_root"/*/*/VC/Tools/MSVC/*/lib/x64/chkstk.obj 2>/dev/null | tail -1 || true)"
         [ -n "$chkstk" ] && break
@@ -158,8 +155,7 @@ prepare_msvc_side() {
 
     if [ -f out/stage-csharp.ok ]; then
         aot_msys=""
-        for base in "${HOME:-/nonexistent}/.nuget/packages" /mnt/c/Users/Lenovo/.nuget/packages \
-                    /c/Users/Lenovo/.nuget/packages; do
+        for base in "${HOME:-/nonexistent}/.nuget/packages"; do
             [ -d "$base" ] || continue
             aot_msys="$(ls -d "$base"/microsoft.netcore.app.runtime.nativeaot.win-x64/*/runtimes/win-x64/native 2>/dev/null | tail -1 || true)"
             [ -n "$aot_msys" ] && break

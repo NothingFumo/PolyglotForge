@@ -69,6 +69,13 @@ static int truth(qf_value v) {
     return -1;
 }
 
+/* 64 位加法溢出检测：不依赖 GCC 内建，MSVC 装配器也能编译 engine.c。 */
+static int add_i64(int64_t a, int64_t b, int64_t* out) {
+    if ((b > 0 && a > INT64_MAX - b) || (b < 0 && a < INT64_MIN - b)) return 1;
+    *out = a + b;
+    return 0;
+}
+
 /* 失败路径统一写诊断：任何非零返回都必须带错误码与可读消息。
    host 不可用时退回静态字面量，生命周期与进程一致。 */
 static qf_err engine_fail(const qf_engine_ctx* c, qf_diag* diag, qf_err code,
@@ -257,7 +264,7 @@ static void agg_apply(agg_state* s, uint8_t op, qf_value v) {
         /* SUM：全整数输入保持 int64；出现浮点或溢出后退回 double。 */
         if (s->sum_is_int && v.type == QF_T_INT && !s->sum_overflow) {
             int64_t next;
-            if (!__builtin_add_overflow(s->isum, v.as.i, &next)) {
+            if (!add_i64(s->isum, v.as.i, &next)) {
                 s->isum = next;
                 return;
             }

@@ -1,13 +1,17 @@
 # 统一补齐工具链路径。Windows 上 MSYS 的 PATH 与原生 exe 的 PATH 不一致，
 # 每个构建/测试脚本 source 这个文件，避免各语言各自猜路径。
+
+# 非交互 Windows bash 只导出 USERPROFILE：统一 HOME，供后续路径推导使用。
+HOME="${HOME:-${USERPROFILE:-/nonexistent}}"
+export HOME
+
 for d in \
-  "/mnt/c/Users/Lenovo/.cargo/bin" "/c/Users/Lenovo/.cargo/bin" \
-  "/mnt/d/go/bin" "/d/go/bin" \
-  "/mnt/c/Program Files/dotnet" "/c/Program Files/dotnet" \
-  "/mnt/c/Strawberry/c/bin" "/c/Strawberry/c/bin" \
-  "/mnt/c/Users/Lenovo/.bun/bin" "/c/Users/Lenovo/.bun/bin" \
-  "/mnt/d/nodejs" "/d/nodejs" \
-  "/mnt/d/Python/Python311" "/d/Python/Python311"; do
+  "$HOME/.cargo/bin" \
+  "/d/go/bin" \
+  "/c/Program Files/dotnet" \
+  "/c/Strawberry/c/bin" \
+  "$HOME/.bun/bin" \
+  "/d/nodejs"; do
   if [ -d "$d" ]; then
     PATH="$d:$PATH"
   fi
@@ -50,9 +54,7 @@ qf_require_cmd() {
 qf_require_python() {
     local want="${1:-}" c
     for c in "${QF_PYTHON:-}" "$(command -v python 2>/dev/null || true)" \
-             "$(command -v python3 2>/dev/null || true)" \
-             "D:/Python/Python311/python.exe" /d/Python/Python311/python.exe \
-             /mnt/d/Python/Python311/python.exe; do
+             "$(command -v python3 2>/dev/null || true)"; do
         [ -n "$c" ] && [ -x "$c" ] || continue
         if [ -z "$want" ]; then printf '%s' "$c"; return 0; fi
         if "$c" -c "import sys; raise SystemExit(0 if sys.version_info[:2] >= tuple(int(x) for x in '$want'.split('.')) else 1)" 2>/dev/null; then

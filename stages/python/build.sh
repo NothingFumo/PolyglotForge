@@ -21,7 +21,7 @@ vendor="$stage/vendor/Python-3.11.9"
 echo "[python] 编译 qf_py.c / qf_py_diag.c / qf_py_value.c"
 PYEXE="${PYEXE:-}"
 if [ -z "$PYEXE" ]; then
-    for c in python python3 "D:/Python/Python311/python.exe" /d/Python/Python311/python.exe /mnt/d/Python/Python311/python.exe; do
+    for c in python python3; do
         if command -v "$c" >/dev/null 2>&1 || [ -x "$c" ]; then PYEXE="$c"; break; fi
     done
 fi

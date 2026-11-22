@@ -20,7 +20,6 @@ scripts/msvc-static.bat、scripts/test-all.sh 四处，加一个阶段要改 13~
   gcc.cxx        链接时需要用 g++ 驱动
   msvc.all       动态 link.exe 装配时追加的归档/对象
   msvc.static    静态 link.exe 装配时追加的归档/对象
-  producer       产出该阶段归档的脚本；None 表示由装配器自己编译
 """
 import argparse
 import os
@@ -134,8 +133,9 @@ def win(path):
 def emit_bat(out, profile):
     """输出三段：宏、产物清单、缺失产物的生成规则。
 
-    生成规则是清单的 producer 字段——装配器不再自己知道 rust/csharp/kotlin 怎么建，
-    只负责"缺了就喊 produce.sh"。每一步之后都复查，失败立即返回，绝不带着半成品链接。
+    每个 msvc 条目是 (路径, 目标)，目标名交给 scripts/produce.py 生成；
+    装配器不再自己知道 rust/csharp/kotlin 怎么建，只负责"缺了就喊"。
+    每一步之后都复查，失败立即返回，绝不带着半成品链接。
     """
     key = "all" if profile == "msvc-all" else "static"
     defines = " ".join("/D" + s["gcc"]["define"] for s in STAGES if s["gcc"]["define"])

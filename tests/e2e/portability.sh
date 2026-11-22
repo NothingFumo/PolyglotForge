@@ -76,5 +76,46 @@ fi
 fi
 [ -n "$zd" ] && rm -rf "$zd"
 
+echo "== 四产物语义一致 =="
+base="dist/queryforge.exe"
+if [ -f "$base" ]; then
+    SEM_QUERIES=(
+        "tests/e2e/data/users.csv|select name as name, (age > 100 or city = 'BJ') as x, age / 2 as half from t order by name asc"
+        "tests/e2e/data/groups.csv|select g as g, count(*) as n from t group by g order by g asc"
+        "tests/e2e/data/users.csv|select count(*) as n from t where age > 1000"
+    )
+    for art in "${QF_ARTIFACTS[@]}"; do
+        name="$(basename "$art")"
+        if [ "$art" = "$base" ] || ! qf_have_artifact "$art"; then
+            continue
+        fi
+        mismatch=""
+        for q in "${SEM_QUERIES[@]}"; do
+            csv="${q%%|*}"
+            sql="${q#*|}"
+            if ! a="$(run_clean "$base" "$csv" "$sql" --raw)"; then
+                mismatch="基准执行失败: $sql"
+                break
+            fi
+            if ! b="$(run_clean "$art" "$csv" "$sql" --raw)"; then
+                mismatch="对照执行失败: $sql"
+                break
+            fi
+            if [ "$a" != "$b" ]; then
+                mismatch="$sql"
+                break
+            fi
+        done
+        if [ -z "$mismatch" ]; then
+            qf_report "$name" "语义与 $base 一致（${#SEM_QUERIES[@]} 条查询）"
+        else
+            qf_report "$name" "语义不一致：$mismatch"
+            fail=1
+        fi
+    done
+else
+    qf_report "$base" "跳过（未构建）"
+fi
+
 qf_summary "$fail" portability
 exit "$fail"

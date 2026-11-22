@@ -6,8 +6,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
 
-PY="$(qf_require "$(command -v python 2>/dev/null || true)" "$(command -v python3 2>/dev/null || true)" \
-           "D:/Python/Python311/python.exe" /mnt/d/Python/Python311/python.exe /d/Python/Python311/python.exe)" \
+PY="$(qf_require "$(command -v python 2>/dev/null || true)" "$(command -v python3 2>/dev/null || true)")" \
      || { echo "找不到 python" >&2; exit 1; }
 
 mkdir -p out/e2e
