@@ -188,16 +188,43 @@ static void emit(run_env* env, const run_out* out) {
 
 typedef struct batch_ctx {
     run_env* env;
+    const char* const* parts; /* 与 Kotlin 回调收到的 sql 指针比对，定位查询槽位 */
+    uint32_t nparts;
+    qf_arena* arenas[64];     /* 失败查询的 arena：diag 指向其中，批处理结束统一释放 */
 } batch_ctx;
 
 static qf_err batch_run_one(void* ctx, const char* sql, uint64_t* rows_out, qf_diag* diag) {
-    run_env* env = ((batch_ctx*)ctx)->env;
+    batch_ctx* b = (batch_ctx*)ctx;
+    run_env* env = b->env;
+
+    uint32_t slot = b->nparts;
+    for (uint32_t i = 0; i < b->nparts; ++i) {
+        if (b->parts[i] == sql) {
+            slot = i;
+            break;
+        }
+    }
+
+    /* 每条查询独占 arena：回调在 Kotlin 协程里并发执行，共享 arena 会交出重叠内存。 */
+    qf_arena* arena = qf_arena_new(1u << 16);
+    if (!arena) return QF_ERR_EXEC;
+    qf_host host = qf_host_make(arena);
+
+    run_env local = *env;
+    local.host = &host;
+    local.arena = arena;
+
     run_out out;
     memset(&out, 0, sizeof out);
-    qf_err rc = exec_query(env, S(sql), &out, diag);
-    if (rc != QF_ERR_OK) return rc;
-    *rows_out = out.result.row_count;
-    return QF_ERR_OK;
+    qf_err rc = exec_query(&local, S(sql), &out, diag);
+    if (rc == QF_ERR_OK) {
+        *rows_out = out.result.row_count;
+        qf_arena_free(arena);
+    } else if (slot < b->nparts) {
+        /* diag.message 指向该 arena，Kotlin 侧要读完才返回，故延迟到批处理结束释放。 */
+        b->arenas[slot] = arena;
+    }
+    return rc;
 }
 
 static void usage(void) {
@@ -310,7 +337,10 @@ int main(int argc, char** argv) {
         uint64_t rows[64];
         memset(rows, 0, sizeof rows);
         batch_ctx bctx;
+        memset(&bctx, 0, sizeof bctx);
         bctx.env = &env;
+        bctx.parts = parts;
+        bctx.nparts = n;
         env.quiet = 0;
         qf_err rc = qf_kt_batch(&host, batch_run_one, &bctx, parts, n, rows, &diag);
         if (rc != QF_ERR_OK) {
@@ -318,6 +348,9 @@ int main(int argc, char** argv) {
             status = 65;
         } else {
             for (uint32_t i = 0; i < n; ++i) printf("query %u: %llu rows\n", i + 1, (unsigned long long)rows[i]);
+        }
+        for (uint32_t i = 0; i < 64; ++i) {
+            if (bctx.arenas[i]) qf_arena_free(bctx.arenas[i]);
         }
     } else {
         if (!sql && !env.dsl) {

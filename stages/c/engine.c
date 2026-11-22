@@ -272,15 +272,12 @@ typedef struct sort_ctx {
     uint32_t nkeys;
 } sort_ctx;
 
-static sort_ctx g_sort;
-
-static int cmp_row(const void* pa, const void* pb) {
-    uint32_t a = *(const uint32_t*)pa, b = *(const uint32_t*)pb;
-    for (uint32_t k = 0; k < g_sort.nkeys; ++k) {
-        int32_t col = g_sort.keys[k];
+static int cmp_idx(const sort_ctx* s, uint32_t a, uint32_t b) {
+    for (uint32_t k = 0; k < s->nkeys; ++k) {
+        int32_t col = s->keys[k];
         if (col < 0) continue;
-        qf_value va = g_sort.values[(size_t)a * g_sort.cols + (uint32_t)col];
-        qf_value vb = g_sort.values[(size_t)b * g_sort.cols + (uint32_t)col];
+        qf_value va = s->values[(size_t)a * s->cols + (uint32_t)col];
+        qf_value vb = s->values[(size_t)b * s->cols + (uint32_t)col];
         if (va.type == QF_T_NULL && vb.type == QF_T_NULL) continue;
         if (va.type == QF_T_NULL) return 1; /* 空值恒排在最后，与升降序无关 */
         if (vb.type == QF_T_NULL) return -1;
@@ -293,9 +290,29 @@ static int cmp_row(const void* pa, const void* pb) {
         } else {
             cmp = 0;
         }
-        if (cmp != 0) return g_sort.desc[k] ? -cmp : cmp;
+        if (cmp != 0) return s->desc[k] ? -cmp : cmp;
     }
     return (a < b) ? -1 : (a > b ? 1 : 0); /* 稳定 */
+}
+
+/* 归并排序：上下文显式传入，不依赖 qsort 的全局状态；--batch 并发调用时安全。
+   按输入下标决胜，因此与 qsort + 下标比较的旧实现排序结果一致。 */
+static void sort_idx(const sort_ctx* s, uint32_t* idx, uint32_t* tmp, uint32_t n) {
+    for (size_t width = 1; width < (size_t)n; width *= 2) {
+        for (size_t base = 0; base < (size_t)n; base += width * 2) {
+            size_t mid = base + width;
+            size_t end = base + width * 2;
+            if (mid > (size_t)n) mid = n;
+            if (end > (size_t)n) end = n;
+            size_t l = base, r = mid, k = base;
+            while (l < mid && r < end) {
+                tmp[k++] = cmp_idx(s, idx[l], idx[r]) <= 0 ? idx[l++] : idx[r++];
+            }
+            while (l < mid) tmp[k++] = idx[l++];
+            while (r < end) tmp[k++] = idx[r++];
+        }
+        memcpy(idx, tmp, (size_t)n * sizeof *idx);
+    }
 }
 
 qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast,
@@ -418,9 +435,10 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
     if (ast->order_count > 0 && out->row_count > 1) {
         uint32_t n = (uint32_t)out->row_count;
         uint32_t* idx = (uint32_t*)qf_arena_alloc(arena, (uint64_t)n * sizeof(uint32_t), 4);
+        uint32_t* swap = (uint32_t*)qf_arena_alloc(arena, (uint64_t)n * sizeof(uint32_t), 4);
         qf_value* tmp = (qf_value*)qf_arena_alloc(
             arena, (uint64_t)n * out_schema->count * sizeof(qf_value), 8);
-        if (!idx || !tmp) return QF_ERR_EXEC;
+        if (!idx || !swap || !tmp) return QF_ERR_EXEC;
         int32_t keys[16];
         uint8_t desc[16];
         uint32_t nk = ast->order_count > 16 ? 16 : ast->order_count;
@@ -430,12 +448,13 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
             desc[i] = (ast->nodes[ast->order_by[i]].flags & QF_F_DESC) ? 1u : 0u;
         }
         for (uint32_t i = 0; i < n; ++i) idx[i] = i;
-        g_sort.values = out->values;
-        g_sort.cols = out_schema->count;
-        g_sort.keys = keys;
-        g_sort.desc = desc;
-        g_sort.nkeys = nk;
-        qsort(idx, n, sizeof(uint32_t), cmp_row);
+        sort_ctx sc;
+        sc.values = out->values;
+        sc.cols = out_schema->count;
+        sc.keys = keys;
+        sc.desc = desc;
+        sc.nkeys = nk;
+        sort_idx(&sc, idx, swap, n);
         for (uint32_t i = 0; i < n; ++i) {
             memcpy(tmp + (size_t)i * out_schema->count,
                    out->values + (size_t)idx[i] * out_schema->count,

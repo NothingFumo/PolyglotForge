@@ -114,6 +114,10 @@ static qf_err py_start(const qf_host* host, qf_diag* diag) {
         }
     }
 #endif
+    /* 初始化完成后主线程仍持有 GIL。若不释放，--batch 的协程线程调用
+       PyGILState_Ensure 会永久阻塞（初次 Ensure 只把计数从 1 加到 2）。
+       此后所有 Python 交互都走 PyGILState_Ensure/Release。 */
+    PyEval_SaveThread();
     return QF_ERR_OK;
 }
 
@@ -293,6 +297,9 @@ done:
 
 void qf_py_shutdown(void) {
     if (!g_initialized) return;
+    /* py_start 末尾已释放 GIL，Finalize 必须在持有 GIL 时调用。
+       FinalizeEx 会销毁解释器与线程状态，因此之后不能再 PyGILState_Release。 */
+    (void)PyGILState_Ensure();
     Py_CLEAR(g_module);
     g_ns = NULL;
     g_loaded = 0;
