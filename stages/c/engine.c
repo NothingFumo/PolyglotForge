@@ -20,7 +20,7 @@ typedef struct qf_engine_ctx {
     qf_arena* arena;
     const qf_ast* ast;
     const qf_schema* table;
-    qf_err err; /* 求值期间的粘性错误；非 OK 时中止整条查询 */
+    const qf_batch* in; /* 当前批次：表达式求值以整批为单位 */
 } qf_engine_ctx;
 
 static qf_value v_null(void) {
@@ -93,145 +93,28 @@ static qf_err engine_fail(const qf_engine_ctx* c, qf_diag* diag, qf_err code,
     return code;
 }
 
-static qf_err uf_call(qf_engine_ctx* c, const qf_node* n, const qf_value* row,
-                      qf_value* out, qf_diag* diag);
-
-/* 求值：row 为输入列的值数组（可能为 NULL，仅当表达式不引用列时）。 */
-static qf_value eval(qf_engine_ctx* c, int32_t idx, const qf_value* row, qf_diag* diag) {
-    if (c->err != QF_ERR_OK) return v_null();
-    const qf_node* n = &c->ast->nodes[idx];
-    switch (n->kind) {
-    case QF_N_LIT:
-        return n->lit;
-    case QF_N_COL:
-        if (!row || (uint32_t)n->a >= c->table->count) return v_null();
-        return row[n->a];
-    case QF_N_BIN: {
-        qf_value l = eval(c, n->a, row, diag);
-        qf_value r = eval(c, n->b, row, diag);
-        /* AND/OR 先按 SQL 三值规则处理：未知与假/真组合仍能定值。 */
-        if (n->op == QF_OP_AND || n->op == QF_OP_OR) {
-            int lt = truth(l), rt = truth(r);
-            if (n->op == QF_OP_AND) {
-                if (lt == 0 || rt == 0) return v_int(0);
-                if (lt < 0 || rt < 0) return v_null();
-                return v_int(1);
-            }
-            if (lt == 1 || rt == 1) return v_int(1);
-            if (lt < 0 || rt < 0) return v_null();
-            return v_int(0);
-        }
-        if (l.type == QF_T_NULL || r.type == QF_T_NULL) return v_null();
-        switch (n->op) {
-        case QF_OP_ADD:
-        case QF_OP_SUB:
-        case QF_OP_MUL:
-        case QF_OP_DIV:
-        case QF_OP_MOD: {
-            if (!is_num(l) || !is_num(r)) return v_null();
-            int both_int = (l.type == QF_T_INT && r.type == QF_T_INT);
-            if (both_int) {
-                int64_t a = l.as.i, b = r.as.i;
-                /* 与 C# unchecked 算术一致：溢出按 uint64 回绕，避免 C 的有符号 UB。 */
-                switch (n->op) {
-                case QF_OP_ADD: return v_int((int64_t)((uint64_t)a + (uint64_t)b));
-                case QF_OP_SUB: return v_int((int64_t)((uint64_t)a - (uint64_t)b));
-                case QF_OP_MUL: return v_int((int64_t)((uint64_t)a * (uint64_t)b));
-                case QF_OP_DIV:
-                    if (b == 0) return v_null();
-                    if (a == INT64_MIN && b == -1) return v_int(INT64_MIN);
-                    return v_int(a / b); /* 整数除法保持整数，与 sqlite 一致 */
-                default:
-                    if (b == 0) return v_null();
-                    if (a == INT64_MIN && b == -1) return v_int(0);
-                    return v_int(a % b);
-                }
-            }
-            double a = as_num(l), b = as_num(r);
-            if ((n->op == QF_OP_DIV || n->op == QF_OP_MOD) && b == 0.0) return v_null();
-            switch (n->op) {
-            case QF_OP_ADD: return v_dbl(a + b);
-            case QF_OP_SUB: return v_dbl(a - b);
-            case QF_OP_MUL: return v_dbl(a * b);
-            case QF_OP_DIV: return v_dbl(a / b);
-            default: return v_dbl(fmod(a, b));
-            }
-        }
-        default: {
-            int cmp = 0;
-            if (l.type == QF_T_INT && r.type == QF_T_INT) {
-                int64_t a = l.as.i, b = r.as.i;
-                cmp = (a < b) ? -1 : (a > b ? 1 : 0);
-            } else if (is_num(l) && is_num(r)) {
-                double a = as_num(l), b = as_num(r);
-                cmp = (a < b) ? -1 : (a > b ? 1 : 0);
-            } else if (l.type == QF_T_TEXT && r.type == QF_T_TEXT) {
-                cmp = str_cmp(l.as.s, r.as.s);
-            } else {
-                return v_null();
-            }
-            int res = 0;
-            switch (n->op) {
-            case QF_OP_EQ: res = cmp == 0; break;
-            case QF_OP_NE: res = cmp != 0; break;
-            case QF_OP_LT: res = cmp < 0; break;
-            case QF_OP_LE: res = cmp <= 0; break;
-            case QF_OP_GT: res = cmp > 0; break;
-            case QF_OP_GE: res = cmp >= 0; break;
-            default: return v_null();
-            }
-            return v_int(res);
-        }
-        }
+/* UDF 回调：C# 求值器遇到 CALL 时回到宿主执行 Python。 */
+static qf_err engine_udf(void* ctx, const qf_str* fn, const qf_value* args,
+                         uint32_t argc, qf_value* out, qf_diag* diag) {
+    const qf_host* host = (const qf_host*)ctx;
+#ifdef QF_HAVE_PYTHON
+    return qf_py_call(host, *fn, args, argc, out, diag);
+#else
+    (void)host; (void)fn; (void)args; (void)argc; (void)out;
+    if (diag) {
+        memset(diag, 0, sizeof *diag);
+        diag->code = QF_ERR_UDF;
+        diag->message.ptr = "构建未包含 Python 阶段";
+        diag->message.len = 26;
     }
-    case QF_N_UNARY: {
-        qf_value v = eval(c, n->a, row, diag);
-        if (n->op == QF_OP_NOT) {
-            int t = truth(v);
-            return t < 0 ? v_null() : v_int(t == 0);
-        }
-        if (v.type == QF_T_NULL) return v_null();
-        if (n->op == QF_OP_NEG) {
-            if (v.type == QF_T_INT) return v_int(-v.as.i);
-            if (v.type == QF_T_DOUBLE) return v_dbl(-v.as.d);
-        }
-        return v_null();
-    }
-    case QF_N_CALL: {
-        qf_value out = v_null();
-        qf_err rc = uf_call(c, n, row, &out, diag);
-        if (rc != QF_ERR_OK) {
-            c->err = rc;
-            if (diag && diag->code == QF_ERR_OK) {
-                engine_fail(c, diag, rc, "UDF 执行失败");
-            }
-            return v_null();
-        }
-        return out;
-    }
-    default:
-        return v_null();
-    }
+    return QF_ERR_UDF;
+#endif
 }
 
-/* UDF：参数先求值，再交给 Python 阶段。失败向上传播，不再静默产出空值。 */
-static qf_err uf_call(qf_engine_ctx* c, const qf_node* n, const qf_value* row,
-                      qf_value* out, qf_diag* diag) {
-    if (n->argc > 16) {
-        return engine_fail(c, diag, QF_ERR_UDF, "UDF 参数过多");
-    }
-    qf_value args[16];
-    for (int32_t i = 0; i < n->argc; ++i) {
-        args[i] = eval(c, n->b + i, row, diag);
-        if (c->err != QF_ERR_OK) return c->err;
-    }
-#ifdef QF_HAVE_PYTHON
-    return qf_py_call(c->host, n->name, args, (uint32_t)n->argc, out, diag);
-#else
-    (void)args;
-    (void)out;
-    return engine_fail(c, diag, QF_ERR_UDF, "构建未包含 Python 阶段");
-#endif
+/* 对整批行求一个表达式；语义与错误都由 C# 阶段负责。 */
+static qf_err eval_values(qf_engine_ctx* c, int32_t node, qf_value* out, qf_diag* diag) {
+    return qf_cs_eval_values(c->host, c->ast, node, c->table, c->in,
+                             engine_udf, (void*)c->host, out, diag);
 }
 
 /* ---------- 聚合 ---------- */
@@ -345,10 +228,13 @@ static qf_err row_keep(qf_engine_ctx* c, const qf_batch* in, const qf_ast* ast,
         memset(*out_keep, 1, in->rows ? in->rows : 1);
         return QF_ERR_OK;
     }
+    qf_value* vals = (qf_value*)qf_arena_alloc(
+        c->arena, (uint64_t)(in->rows ? in->rows : 1) * sizeof(qf_value), 8);
+    if (!vals) return engine_fail(c, diag, QF_ERR_EXEC, "宿主分配过滤结果失败");
+    qf_err rc = eval_values(c, ast->where_root, vals, diag);
+    if (rc != QF_ERR_OK) return rc;
     for (uint32_t r = 0; r < in->rows; ++r) {
-        qf_value v = eval(c, ast->where_root, &in->values[r * in->cols], diag);
-        if (c->err != QF_ERR_OK) return c->err;
-        (*out_keep)[r] = (uint8_t)(truth(v) == 1);
+        (*out_keep)[r] = (uint8_t)(truth(vals[r]) == 1);
     }
     return QF_ERR_OK;
 }
@@ -417,6 +303,7 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
     c.arena = arena;
     c.ast = ast;
     c.table = table;
+    c.in = in;
 
     if (!in) return engine_fail(&c, diag, QF_ERR_ARG, "qf_engine_execute 收到空批次");
     if (in->cols != table->count) {
@@ -438,6 +325,46 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
 
     int has_agg = select_has_agg(ast);
 
+    /* 每个表达式按整批求值一次：分组键、投影列与聚合参数之后只做数组索引。 */
+    uint32_t nrows = in->rows;
+    qf_value** gvals = NULL;
+    if (ast->group_count > 0) {
+        gvals = (qf_value**)qf_arena_alloc(
+            arena, (uint64_t)ast->group_count * sizeof(qf_value*), 8);
+        if (!gvals) return engine_fail(&c, diag, QF_ERR_EXEC, "宿主分配分组键失败");
+        for (uint32_t g = 0; g < ast->group_count; ++g) {
+            gvals[g] = (qf_value*)qf_arena_alloc(
+                arena, (uint64_t)(nrows ? nrows : 1) * sizeof(qf_value), 8);
+            if (!gvals[g]) return engine_fail(&c, diag, QF_ERR_EXEC, "宿主分配分组键失败");
+            qf_err erc = eval_values(&c, ast->group_by[g], gvals[g], diag);
+            if (erc != QF_ERR_OK) return erc;
+        }
+    }
+
+    qf_value** svals = (qf_value**)qf_arena_alloc(
+        arena, (uint64_t)ast->select_count * sizeof(qf_value*), 8);
+    qf_value** avals = (qf_value**)qf_arena_alloc(
+        arena, (uint64_t)ast->select_count * sizeof(qf_value*), 8);
+    if (!svals || !avals) return engine_fail(&c, diag, QF_ERR_EXEC, "宿主分配投影列失败");
+    for (uint32_t si = 0; si < ast->select_count; ++si) {
+        svals[si] = NULL;
+        avals[si] = NULL;
+        int32_t ni = ast->select[si];
+        const qf_node* n = &ast->nodes[ni];
+        int32_t expr = ni;
+        qf_value** slot = &svals[si];
+        if (n->kind == QF_N_AGG) {
+            if (n->argc == 0) continue; /* count(*) 无参数 */
+            expr = n->b;
+            slot = &avals[si];
+        }
+        *slot = (qf_value*)qf_arena_alloc(
+            arena, (uint64_t)(nrows ? nrows : 1) * sizeof(qf_value), 8);
+        if (!*slot) return engine_fail(&c, diag, QF_ERR_EXEC, "宿主分配投影列失败");
+        qf_err erc = eval_values(&c, expr, *slot, diag);
+        if (erc != QF_ERR_OK) return erc;
+    }
+
     if (has_agg || ast->group_count > 0) {
         /* 分组：线性扫描；组数按需翻倍扩容，不设固定上限。 */
         uint32_t cap = 64, ngroups = 0;
@@ -447,16 +374,13 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
 
         for (uint32_t r = 0; r < in->rows; ++r) {
             if (!keep[r]) continue;
-            const qf_value* row = &in->values[(size_t)r * in->cols];
             uint32_t g = 0;
             for (; g < ngroups; ++g) {
                 uint32_t fr = group_first[g];
-                const qf_value* frow = &in->values[(size_t)fr * in->cols];
                 uint32_t k = 0;
                 for (; k < ast->group_count; ++k) {
-                    qf_value a = eval(&c, ast->group_by[k], row, diag);
-                    qf_value b = eval(&c, ast->group_by[k], frow, diag);
-                    if (c.err != QF_ERR_OK) return c.err;
+                    qf_value a = gvals[k][r];
+                    qf_value b = gvals[k][fr];
                     if (a.type != b.type) break;
                     if (a.type == QF_T_TEXT) {
                         if (str_cmp(a.as.s, b.as.s) != 0) break;
@@ -487,7 +411,6 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
 
         for (uint32_t g = 0; g < ngroups; ++g) {
             uint32_t first_row = group_first[g];
-            const qf_value* first = &in->values[(size_t)first_row * in->cols];
             for (uint32_t si = 0; si < ast->select_count; ++si) {
                 int32_t ni = ast->select[si];
                 const qf_node* n = &ast->nodes[ni];
@@ -498,12 +421,10 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
                     st.sum_is_int = 1;
                     for (uint32_t r = first_row; r < in->rows; ++r) {
                         if (!keep[r]) continue;
-                        const qf_value* row = &in->values[(size_t)r * in->cols];
                         uint32_t gk = 0;
                         for (; gk < ast->group_count; ++gk) {
-                            qf_value a = eval(&c, ast->group_by[gk], row, diag);
-                            qf_value b = eval(&c, ast->group_by[gk], first, diag);
-                            if (c.err != QF_ERR_OK) return c.err;
+                            qf_value a = gvals[gk][r];
+                            qf_value b = gvals[gk][first_row];
                             int same = (a.type == b.type) &&
                                        ((a.type == QF_T_TEXT && str_cmp(a.as.s, b.as.s) == 0) ||
                                         (a.type == QF_T_INT && a.as.i == b.as.i) ||
@@ -513,17 +434,14 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
                         }
                         if (gk != ast->group_count) continue;
                         if (n->argc > 0) {
-                            qf_value arg = eval(&c, n->b, row, diag);
-                            if (c.err != QF_ERR_OK) return c.err;
-                            agg_apply(&st, n->op, arg);
+                            agg_apply(&st, n->op, avals[si][r]);
                         } else {
                             agg_apply(&st, n->op, v_int(1));
                         }
                     }
                     v = agg_finish(&st, n->op);
                 } else {
-                    v = eval(&c, ni, first, diag);
-                    if (c.err != QF_ERR_OK) return c.err;
+                    v = svals[si][first_row];
                 }
                 out->values[(size_t)out->row_count * out_schema->count + si] = v;
             }
@@ -550,11 +468,8 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
     } else {
         for (uint32_t r = 0; r < in->rows; ++r) {
             if (!keep[r]) continue;
-            const qf_value* row = &in->values[(size_t)r * in->cols];
             for (uint32_t si = 0; si < ast->select_count; ++si) {
-                qf_value v = eval(&c, ast->select[si], row, diag);
-                if (c.err != QF_ERR_OK) return c.err;
-                out->values[(size_t)out->row_count * out_schema->count + si] = v;
+                out->values[(size_t)out->row_count * out_schema->count + si] = svals[si][r];
             }
             out->row_count++;
         }
@@ -594,7 +509,6 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
         memcpy(out->values, tmp, sizeof(qf_value) * out_schema->count * n);
     }
 
-    if (c.err != QF_ERR_OK) return c.err;
     if (ast->limit >= 0 && (uint64_t)ast->limit < out->row_count) out->row_count = (uint64_t)ast->limit;
     return QF_ERR_OK;
 }

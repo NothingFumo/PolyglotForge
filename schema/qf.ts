@@ -3,7 +3,7 @@
  * codegen/gen.ts 从这里生成 C / C# / Python 的绑定，禁止在别处手写这些常量。
  */
 
-export const ABI_VERSION = 2;
+export const ABI_VERSION = 3;
 
 export const ERR = {
   OK: 0,

@@ -149,6 +149,39 @@ internal static unsafe class Exports
         }
     }
 
+    [UnmanagedCallersOnly(EntryPoint = "qf_cs_eval_values")]
+    public static unsafe int EvalValues(
+        QfHost* host, QfAst* ast, int node, QfSchema* table, QfBatch* batch,
+        delegate* unmanaged<byte*, QfStr*, QfValue*, uint, QfValue*, QfDiag*, int> udf,
+        byte* udfCtx, QfValue* outValues, QfDiag* diag)
+    {
+        Diag.Zero(diag);
+        if (host == null || ast == null || table == null || batch == null || outValues == null)
+        {
+            return Diag.Fail(diag, host, QfErr.Arg, "求值参数为空");
+        }
+        if ((uint)node >= ast->NodeCount)
+        {
+            return Diag.Fail(diag, host, QfErr.Arg, "表达式节点下标越界");
+        }
+
+        try
+        {
+            new ValueEvaluator(ast, batch, host, diag, udf, udfCtx).Run(node, outValues);
+            return QfErr.Ok;
+        }
+        catch (EvalError e)
+        {
+            // UDF 回调可能已经写入具体原因（例如 Python 异常），不要覆盖。
+            if (diag != null && diag->Code != QfErr.Ok) return e.Code;
+            return Diag.Fail(diag, host, e.Code, e.Message);
+        }
+        catch (Exception e)
+        {
+            return Diag.Fail(diag, host, QfErr.Panic, "求值表达式时发生未预期错误：" + e.GetType().Name);
+        }
+    }
+
     [UnmanagedCallersOnly(EntryPoint = "qf_cs_free")]
     public static void Free(void* pred)
     {

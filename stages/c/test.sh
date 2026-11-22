@@ -10,6 +10,7 @@ CC="$(qf_require "$(command -v gcc 2>/dev/null || true)" /mnt/c/Strawberry/c/bin
 cd "$root"
 mkdir -p out
 "$CC" -std=c11 -Wall -Wextra -Werror -Igen -Icontracts -Istages/c \
-      stages/c/arena.c stages/c/engine.c tests/c/engine_selftest.c \
-      -o out/c_selftest.exe
-./out/c_selftest.exe
+      -fsyntax-only stages/c/main.c stages/c/engine.c stages/c/arena.c stages/c/host.c
+"$CC" -std=c11 -Wall -Wextra -Werror -Igen -Icontracts -Istages/c \
+      stages/c/arena.c tests/c/arena_selftest.c -o out/c_arena_selftest.exe
+./out/c_arena_selftest.exe

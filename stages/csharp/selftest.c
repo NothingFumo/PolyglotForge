@@ -294,6 +294,81 @@ static void test_compile_error(const qf_host* host) {
     if (diag.message.ptr) printf("  diag: %.*s\n", (int)diag.message.len, diag.message.ptr);
 }
 
+/* ---------- 5. 通用表达式求值 ---------- */
+
+static void test_eval_values(const qf_host* host) {
+    qf_node nodes[5];
+    qf_ast ast;
+    qf_col cols[1];
+    qf_schema table;
+    qf_diag diag;
+    qf_value vals[3];
+    qf_value out[3];
+    qf_batch batch;
+    qf_err rc;
+
+    printf("[case] qf_cs_eval_values\n");
+    base_ast(&ast, nodes, 5, -1);
+
+    /* age * 2 + 1 */
+    nodes[0].kind = QF_N_COL;
+    nodes[0].a = 0;
+    nodes[0].flags = (uint16_t)((QF_T_INT << QF_F_TYPE_SHIFT) | QF_F_RESOLVED);
+    nodes[1].kind = QF_N_LIT;
+    nodes[1].lit.type = QF_T_INT;
+    nodes[1].lit.as.i = 2;
+    nodes[2].kind = QF_N_BIN;
+    nodes[2].op = QF_OP_MUL;
+    nodes[2].a = 0;
+    nodes[2].b = 1;
+    nodes[3].kind = QF_N_LIT;
+    nodes[3].lit.type = QF_T_INT;
+    nodes[3].lit.as.i = 1;
+    nodes[4].kind = QF_N_BIN;
+    nodes[4].op = QF_OP_ADD;
+    nodes[4].a = 2;
+    nodes[4].b = 3;
+
+    memset(cols, 0, sizeof cols);
+    cols[0].name = STR("age");
+    cols[0].type = QF_T_INT;
+    table.count = 1;
+    table.cols = cols;
+
+    memset(vals, 0, sizeof vals);
+    vals[0].type = QF_T_INT;
+    vals[0].as.i = 40;
+    vals[1].type = QF_T_NULL;
+    vals[2].type = QF_T_INT;
+    vals[2].as.i = 7;
+    batch.rows = 3;
+    batch.cols = 1;
+    batch.values = vals;
+
+    memset(&diag, 0, sizeof diag);
+    memset(out, 0, sizeof out);
+    rc = qf_cs_eval_values(host, &ast, 4, &table, &batch, NULL, NULL, out, &diag);
+    CHECK(rc == QF_ERR_OK, "通用求值失败");
+    if (rc != QF_ERR_OK) print_diag(&diag);
+    CHECK(out[0].type == QF_T_INT && out[0].as.i == 81, "40*2+1 应为 81");
+    CHECK(out[1].type == QF_T_NULL, "空值应传播");
+    CHECK(out[2].type == QF_T_INT && out[2].as.i == 15, "7*2+1 应为 15");
+
+    /* 文本输出必须经 host->str 拷回 */
+    memset(vals, 0, sizeof vals);
+    vals[0].type = QF_T_TEXT;
+    vals[0].as.s = STR("Ann");
+    batch.rows = 1;
+    batch.values = vals;
+    memset(&diag, 0, sizeof diag);
+    memset(out, 0, sizeof out);
+    rc = qf_cs_eval_values(host, &ast, 0, &table, &batch, NULL, NULL, out, &diag);
+    CHECK(rc == QF_ERR_OK, "文本求值失败");
+    CHECK(out[0].type == QF_T_TEXT && out[0].as.s.len == 3 &&
+          out[0].as.s.ptr && memcmp(out[0].as.s.ptr, "Ann", 3) == 0,
+          "文本输出应为 Ann");
+}
+
 int main(void) {
     qf_host host;
     host.alloc = host_alloc;
@@ -304,6 +379,7 @@ int main(void) {
     test_null_compare(&host);
     test_text_ordinal(&host);
     test_compile_error(&host);
+    test_eval_values(&host);
 
     qf_cs_free(NULL); /* 空句柄必须安全 */
 

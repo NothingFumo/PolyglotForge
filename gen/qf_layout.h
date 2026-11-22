@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define QF_ABI_VERSION 2
+#define QF_ABI_VERSION 3
 
 typedef int32_t qf_err;
 enum {

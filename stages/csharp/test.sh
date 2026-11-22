@@ -120,7 +120,7 @@ if [ -n "$dump" ]; then
     esac
 
     missing=""
-    for s in qf_cs_compile qf_cs_eval qf_cs_free; do
+    for s in qf_cs_compile qf_cs_eval qf_cs_eval_values qf_cs_free; do
         case "$syms" in
         *"$s"*) ;;
         *) missing="$missing $s" ;;
@@ -132,7 +132,7 @@ if [ -n "$dump" ]; then
         echo "[csharp] 导出符号缺失:$missing" >&2
         exit 1
     else
-        echo "[csharp] 导出符号齐全：qf_cs_compile / qf_cs_eval / qf_cs_free"
+        echo "[csharp] 导出符号齐全：qf_cs_compile / qf_cs_eval / qf_cs_eval_values / qf_cs_free"
     fi
 else
     echo "[csharp] 缺少 dumpbin/nm，跳过导出符号校验"

@@ -52,6 +52,18 @@ qf_err qf_cs_compile(const qf_host* host, const qf_ast* ast, int32_t root,
 qf_err qf_cs_eval(qf_pred* pred, const qf_batch* batch, uint8_t* keep, qf_diag* diag);
 void   qf_cs_free(qf_pred* pred);
 
+/* UDF 回调：C# 求值器遇到 CALL 节点时调用宿主。
+   文本与值都用指针传递，避免跨 ABI 按值传 16 字节结构体。 */
+typedef qf_err (*qf_udf_call_fn)(void* ctx, const qf_str* fn, const qf_value* args,
+                                 uint32_t argc, qf_value* out, qf_diag* diag);
+
+/* 对整批行求一个非聚合表达式的值；out 长度为 batch->rows，按行序写入。
+   投影、分组键与聚合参数都走这一个入口，C 侧不再保留表达式解释器。 */
+qf_err qf_cs_eval_values(const qf_host* host, const qf_ast* ast, int32_t node,
+                         const qf_schema* table, const qf_batch* batch,
+                         qf_udf_call_fn udf, void* udf_ctx,
+                         qf_value* out, qf_diag* diag);
+
 /* ---------- 阶段：Kotlin DSL 前端与协程批处理 ---------- */
 
 qf_err qf_dsl_build(const qf_host* host, qf_str src, qf_ast** out, qf_diag* diag);

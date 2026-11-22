@@ -79,7 +79,7 @@ class QfAst(ctypes.Structure):
     ]
 
 
-ABI_VERSION = 2
+ABI_VERSION = 3
 QF_OK = 0
 QF_ERR_PARSE = 3
 QF_ERR_TYPE = 4

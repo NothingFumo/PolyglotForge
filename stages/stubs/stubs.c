@@ -56,6 +56,14 @@ qf_err qf_cs_eval(qf_pred* pred, const qf_batch* batch, uint8_t* keep, qf_diag* 
     return unsupported(diag, "缺少 C# 谓词阶段", 20);
 }
 void qf_cs_free(qf_pred* pred) { (void)pred; }
+qf_err qf_cs_eval_values(const qf_host* host, const qf_ast* ast, int32_t node,
+                         const qf_schema* table, const qf_batch* batch,
+                         qf_udf_call_fn udf, void* udf_ctx,
+                         qf_value* out, qf_diag* diag) {
+    (void)host; (void)ast; (void)node; (void)table; (void)batch;
+    (void)udf; (void)udf_ctx; (void)out;
+    return unsupported(diag, "缺少 C# 谓词阶段", 20);
+}
 #endif
 
 #ifndef QF_HAVE_KOTLIN
