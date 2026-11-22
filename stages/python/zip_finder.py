@@ -72,7 +72,9 @@ class _Finder:
             info = _entries.get(base + ".py")
         if info is None:
             return None
-        spec = _frozen.ModuleSpec(fullname, _Loader(fullname, info), origin="<zip>")
+        _member = base + ("/__init__.py" if is_pkg else ".py")
+        spec = _frozen.ModuleSpec(fullname, _Loader(fullname, info),
+                                  origin="<zip>/" + _member)
         if is_pkg:
             spec.submodule_search_locations = []
         return spec

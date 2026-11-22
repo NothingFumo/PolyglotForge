@@ -13,6 +13,13 @@ bash "$stage/build.sh"
 [ -f out/qf_py.obj ] || { echo "错误：缺少 out/qf_py.obj" >&2; exit 1; }
 [ -f out/python311.lib ] || { echo "错误：缺少 out/python311.lib（静态 CPython 未产出）" >&2; exit 1; }
 
+payload="$stage/../../out/payload_blob.obj"
+if [ ! -f "$payload" ]; then
+    echo "[python] 生成载荷对象"
+    PY_BIN="$(qf_require_python)" || { echo "找不到 python" >&2; exit 1; }
+    "$PY_BIN" "$stage/../../scripts/make_payload.py" --object
+fi
+
 echo "[python] 链接自测程序"
 # 静态库没有编译期 home：把源码树自带的 Lib/ 作为标准库目录编进测试程序
 # （等价于集成时把 PYTHONHOME 指向载荷解包目录）。
@@ -20,7 +27,8 @@ home_fwd="$(to_win "$stage/vendor/Python-3.11.9" | tr '\\' '/')"
 "$QF_CL" -nologo -O2 -MD -W4 -D_CRT_SECURE_NO_WARNINGS \
       -DQF_TEST_PYTHONHOME="\"$home_fwd\"" \
       -I../../gen -I../../contracts \
-      -Foout/ -Fe:out/python_selftest.exe selftest.c out/qf_py.obj out/python311.lib \
+      -Foout/ -Fe:out/python_selftest.exe selftest.c out/qf_py.obj out/qf_py_diag.obj out/qf_py_value.obj \
+      "$payload" out/python311.lib \
       -link -IMPLIB:out/python_selftest.lib \
       version.lib ws2_32.lib pathcch.lib bcrypt.lib advapi32.lib ole32.lib \
       user32.lib shell32.lib

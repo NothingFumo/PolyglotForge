@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # 从 CPython 源码产出可静态链入的 python311.lib。
 #
-# 流程沿用 CPython 官方 PCbuild，只在 vendor 内做了四处改造（全部由本脚本落实）：
+# 流程沿用 CPython 官方 PCbuild，vendor 内的改造全部由本脚本落实（无手工补丁）：
 #   1. PCbuild/pythoncore.vcxproj：ConfigurationType 改成 StaticLibrary；
 #   2. 预处理器宏去掉 _USRDLL/Py_ENABLE_SHARED，改用 Py_NO_ENABLE_SHARED，
 #      否则 PyAPI_FUNC 会退化成 __declspec(dllimport)；
 #   3. PCbuild/pyproject.props 关掉 WholeProgramOptimization：/GL 产物是 IL，
 #      binutils(ld) 读不了，会挡住 MinGW 主干链接；
 #   4. 新增 PC/qf_static_support.c：静态构建时 Py_ENABLE_SHARED 关闭导致
-#      PyWin_DLLhModule 没有定义，而 getpath/dynload_win/sysmodule 仍然引用它。
+#      PyWin_DLLhModule 没有定义，而 getpath/dynload_win/sysmodule 仍然引用它；
+#   5. pyproject.props 的 RuntimeLibrary 改成 MultiThreaded：产物要能进静态 CRT 的链接；
+#   6. 调 scripts/freeze_encodings.py --install：把 encodings 的 122 个模块冻结进
+#      Python/frozen.c（构建期冻结，运行期不再改指针）。
 # 细节与踩坑记录见同目录 STATIC-NOTES.md。
 set -euo pipefail
 stage="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,7 +57,7 @@ fi
 # 于是失败后回落到 curl 抓同一个 cpython-source-deps 压缩包。
 if [ ! -f "$SRC/externals/zlib-1.3.1/zlib.h" ]; then
     echo "[cpython] 抓 externals"
-    ( cd "$SRC/PCbuild" && MSYS_NO_PATHCONV=1 "$(command -v cmd.exe)" /c \
+    ( cd "$SRC/PCbuild" && MSYS_NO_PATHCONV=1 cmd /c \
         'get_externals.bat --no-tkinter --no-openssl --no-libffi --python '"$(to_win "$PY")" ) || true
 fi
 if [ ! -f "$SRC/externals/zlib-1.3.1/zlib.h" ]; then
@@ -114,6 +117,15 @@ patch(core,
 patch(root + '/PCbuild/pyproject.props',
       '<WholeProgramOptimization>true</WholeProgramOptimization>',
       '<WholeProgramOptimization>false</WholeProgramOptimization>')
+# 静态 CRT：python311.lib 最终要被 /MT 的 MSVC 产物链接，两套 CRT 不能混。
+props = root + '/PCbuild/pyproject.props'
+with io.open(props, encoding='utf-8-sig') as f:
+    text = f.read()
+if '<RuntimeLibrary>MultiThreaded</RuntimeLibrary>' not in text:
+    text = text.replace('<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>',
+                        '<RuntimeLibrary>MultiThreaded</RuntimeLibrary>', 1)
+    with io.open(props, 'w', encoding='utf-8-sig', newline='') as f:
+        f.write(text)
 PYEOF
 
 build() {
@@ -130,6 +142,11 @@ build() {
 build _freeze_module.vcxproj
 [ -f "$SRC/Python/deepfreeze/deepfreeze.c" ] || die "deepfreeze.c 没有生成"
 [ -f "$SRC/Python/frozen_modules/importlib._bootstrap.h" ] || die "frozen 模块头没有生成"
+
+# 1.5) encodings 冻结进 Python/frozen.c（构建期表；运行期不再安装任何东西）
+echo "[cpython] 冻结 encodings"
+"$PY" "$stage/../../scripts/freeze_encodings.py" --install || die "encodings 冻结失败"
+grep -q "qf:encodings-freeze:begin" "$SRC/Python/frozen.c" || die "frozen.c 未写入冻结表"
 
 # 2) 静态 pythoncore → PCbuild/amd64/python311.lib
 build pythoncore.vcxproj

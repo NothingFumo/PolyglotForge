@@ -17,18 +17,23 @@
 
 ## 正确路线
 
-1. **构建期冻结**：直接改 `Python/frozen.c` 的 `stdlib_modules[]` 数组（把 `stages/python/frozen/*.h`
-   复制进 `Python/frozen_modules/` 并在数组里追加 122 个 `encodings.*` 条目），重编 `python311.lib`。
-   目录里已有 `scripts/freeze_encodings.py` 生成的头文件，只差搬运与重编。
+1. **构建期冻结**：`scripts/freeze_encodings.py --install` 生成 122 个头文件，复制进
+   `Python/frozen_modules/`，并写入 `Python/frozen.c` 的 include 块与 `stdlib_modules[]`
+   条目（`encodings` 的 `is_package` 为 1）。`build_static_python.sh` 在构建 `pythoncore`
+   之前调用它，因此"构建期冻结"是可复现的，不依赖任何手工改动。
 2. **运行期内存 finder**：再实现一个从内嵌 zip 字节读取源码的 `meta_path` finder（用内建的 `_struct`/`zlib`
    解析 zip，`compile()` 后 `exec`），负责 `json`/`re` 等其余纯 Python 模块。
-3. 删除 `payload_materialize`（当前把 `lib.zip` 释放到 `%LOCALAPPDATA%` 的逻辑）。
+3. 删除 `payload_materialize`（把 `lib.zip` 释放到 `%LOCALAPPDATA%` 的旧逻辑）。**已完成**。
 
-## 现状与代价
+## 现状
 
-- 当前仍走"内嵌 zip + 首次释放"：单文件、无伴随文件，但首次 UDF 会写一个缓存 zip。
-- 已落地的前置件：`scripts/freeze_encodings.py`（生成 122 个模块的冻结表）与 `qf_py_frozen.c`，已在链接里但不启用（`QF_USE_FROZEN_ENCODINGS` 未定义），等 CPython 重编后开启。
-- 第 1 步需要重跑 PCbuild（约 10 分钟），第 2 步约 300 行；两者都不改动任何语言阶段的契约。
+- 运行期不落盘：标准库由内嵌 zip 的内存 finder 提供，encodings 来自构建期冻结表。
+- `qf_py_frozen.c`（运行期拼表）与 `QF_USE_FROZEN_ENCODINGS` 已删除；链接里只有
+  `qf_py.obj`，冻结内容在 `python311.lib` 里。
+- 载荷以只读段链入：`ld -r -b binary` 生成对象，再由 `objcopy --rename-section
+  .data=.rdata,...` 改名（ld 的 PE 目标不支持该选项），
+  `objdump -h` 里能看到 zip 落在 `.rdata`。
+- 代价：重编 `python311.lib` 需要 PCbuild（增量约 30 秒，全量约 10 分钟）。
 
 ### 追加：分类指针同样不可改（最终结论）
 

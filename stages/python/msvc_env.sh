@@ -66,11 +66,18 @@ qf_msvc_setup() {
 
     # vcvars64.bat 才带 Windows SDK / UCrt 的 INCLUDE，cl 用它找 stdio.h 等系统头。
     # cmd /c 内联 call 会被引号咬到，落成临时 .bat 最稳。
-    local cmd_exe="/mnt/c/Windows/system32/cmd.exe"
-    [ -x "$cmd_exe" ] || cmd_exe="$(command -v cmd.exe || true)"
-    if [ -z "$cmd_exe" ]; then
-        echo "错误：找不到 cmd.exe" >&2
-        return 1
+    # 用 PATH 解析出的 Windows 形式（C:\Windows\system32\cmd.exe）；直接把
+    # /mnt/c/... 交给 CreateProcess 时，部分 MSYS 变体会丢掉工作目录，
+    # cmd 一启动就报 "The system cannot find the path specified"。
+    # 必须用 PATH 里的短名 "cmd"：command -v 返回的是 "C:\Windows\system32/cmd.exe"
+    # 这种混合分隔符，作为 argv[0] 交给 CreateProcess 会丢工作目录。
+    local cmd_exe=cmd
+    if ! command -v cmd >/dev/null 2>&1; then
+        cmd_exe="/mnt/c/Windows/system32/cmd.exe"
+        if [ ! -x "$cmd_exe" ]; then
+            echo "错误：找不到 cmd.exe" >&2
+            return 1
+        fi
     fi
 
     local vcvars_win bat dump tries

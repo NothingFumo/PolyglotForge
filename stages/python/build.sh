@@ -18,7 +18,7 @@ vendor="$stage/vendor/Python-3.11.9"
 [ -d "$vendor/Include" ] || die "缺少 CPython 源码：先跑 bash stages/python/build_static_python.sh"
 [ -f "$vendor/PC/pyconfig.h" ] || die "缺少 PC/pyconfig.h（检查 vendor 是否完整）"
 
-echo "[python] 编译 qf_py.c"
+echo "[python] 编译 qf_py.c / qf_py_diag.c / qf_py_value.c"
 PYEXE="${PYEXE:-}"
 if [ -z "$PYEXE" ]; then
     for c in python python3 "D:/Python/Python311/python.exe" /d/Python/Python311/python.exe /mnt/d/Python/Python311/python.exe; do
@@ -33,12 +33,13 @@ fi
       -Foout/qf_py.obj qf_py.c
 [ -f out/qf_py.obj ] || die "cl 没有产出 out/qf_py.obj"
 
-echo "[python] 编译冻结的 encodings 表"
-"$QF_CL" -nologo -c -O2 -MD -W4 -D_CRT_SECURE_NO_WARNINGS -DPy_NO_ENABLE_SHARED \
-      -Ivendor/Python-3.11.9/Include -Ivendor/Python-3.11.9/PC \
-      -I../../gen -I../../contracts \
-      -Foout/qf_py_frozen.obj qf_py_frozen.c
-[ -f out/qf_py_frozen.obj ] || die "cl 没有产出 out/qf_py_frozen.obj"
+for unit in qf_py_diag qf_py_value; do
+    "$QF_CL" -nologo -c -O2 -MD -W4 -D_CRT_SECURE_NO_WARNINGS -DPy_NO_ENABLE_SHARED -DQF_HAVE_PY_PAYLOAD \
+          -Ivendor/Python-3.11.9/Include -Ivendor/Python-3.11.9/PC \
+          -I../../gen -I../../contracts \
+          -Fo"out/$unit.obj" "$unit.c" || die "cl 编译 $unit.c 失败"
+    [ -f "out/$unit.obj" ] || die "cl 没有产出 out/$unit.obj"
+done
 
 lib_src="$vendor/PCbuild/amd64/python311.lib"
 if [ ! -f "$lib_src" ]; then
