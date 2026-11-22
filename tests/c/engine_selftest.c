@@ -458,11 +458,66 @@ int main(void) {
               "UDF 失败应带诊断");
     }
 
+    /* 11. ORDER BY 不再截断到 16 键：第 17 个键必须生效。 */
+    {
+        qf_col wcols[17];
+        qf_col wout[17];
+        qf_value wrow[17 * 2];
+        char wnames[17][4];
+        for (int wi = 0; wi < 17; ++wi) {
+            snprintf(wnames[wi], sizeof wnames[wi], "c%d", wi + 1);
+            wcols[wi].name.ptr = wnames[wi];
+            wcols[wi].name.len = (uint32_t)strlen(wnames[wi]);
+            wcols[wi].type = QF_T_INT;
+            wout[wi] = wcols[wi];
+        }
+        for (int wi = 0; wi < 17; ++wi) {
+            wrow[wi] = i64(1);
+            wrow[17 + wi] = i64(1);
+        }
+        wrow[16] = i64(2);      /* 第一行 c17 = 2 */
+        wrow[17 + 16] = i64(1); /* 第二行 c17 = 1 */
+        qf_schema wtable = {17, wcols};
+        qf_schema wout_schema = {17, wout};
+        qf_batch wb = {2, 17, wrow};
+
+        qf_node wnodes[40];
+        memset(wnodes, 0, sizeof wnodes);
+        for (int wi = 0; wi < 17; ++wi) {
+            wnodes[wi].kind = QF_N_COL;
+            wnodes[wi].a = wi;
+            wnodes[wi].flags = QF_T_INT;
+            wnodes[17 + wi].kind = QF_N_COL;
+            wnodes[17 + wi].a = wi; /* ORDER BY 引用输出列 */
+        }
+        int32_t sw[17];
+        int32_t ow[17];
+        for (int wi = 0; wi < 17; ++wi) {
+            sw[wi] = wi;
+            ow[wi] = 17 + wi;
+        }
+        qf_ast astw;
+        memset(&astw, 0, sizeof astw);
+        astw.nodes = wnodes; astw.node_count = 34;
+        astw.select = sw; astw.select_count = 17;
+        astw.from_table.ptr = "t"; astw.from_table.len = 1;
+        astw.where_root = -1;
+        astw.order_by = ow; astw.order_count = 17;
+        astw.limit = -1;
+        qf_result rw;
+        memset(&rw, 0, sizeof rw);
+        rc = qf_engine_execute(&host, arena, &astw, &wtable, &wout_schema, &wb,
+                               NULL, NULL, &rw, &diag);
+        CHECK(rc == QF_ERR_OK && rw.row_count == 2, "17 键排序应成功");
+        CHECK(rw.values[16].as.i == 1 && rw.values[17 + 16].as.i == 2,
+              "第 17 个排序键必须生效");
+    }
+
     qf_arena_free(arena);
     if (failures) {
         printf("c stage FAILED (%d)\n", failures);
         return 1;
     }
-    printf("c stage OK: 分组/扩容/空聚合/过滤/排序/空值/三值逻辑/int64/整数除法/SUM/UDF 失败 全部通过\n");
+    printf("c stage OK: 分组/扩容/空聚合/过滤/排序/17 键排序/空值/三值逻辑/int64/整数除法/SUM/UDF 失败 全部通过\n");
     return 0;
 }

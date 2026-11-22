@@ -1,0 +1,1 @@
+select a1 as a1, a2 as a2, a3 as a3, a4 as a4, a5 as a5, a6 as a6, a7 as a7, a8 as a8, a9 as a9, a10 as a10, a11 as a11, a12 as a12, a13 as a13, a14 as a14, a15 as a15, a16 as a16, a17 as a17 from t order by a1 asc, a2 asc, a3 asc, a4 asc, a5 asc, a6 asc, a7 asc, a8 asc, a9 asc, a10 asc, a11 asc, a12 asc, a13 asc, a14 asc, a15 asc, a16 asc, a17 asc

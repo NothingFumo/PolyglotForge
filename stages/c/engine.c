@@ -560,12 +560,12 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
         uint32_t* swap = (uint32_t*)qf_arena_alloc(arena, (uint64_t)n * sizeof(uint32_t), 4);
         qf_value* tmp = (qf_value*)qf_arena_alloc(
             arena, (uint64_t)n * out_schema->count * sizeof(qf_value), 8);
-        if (!idx || !swap || !tmp) {
+        uint32_t nk = ast->order_count;
+        int32_t* keys = (int32_t*)qf_arena_alloc(arena, (uint64_t)nk * sizeof(int32_t), 4);
+        uint8_t* desc = (uint8_t*)qf_arena_alloc(arena, (uint64_t)nk, 1);
+        if (!idx || !swap || !tmp || !keys || !desc) {
             return engine_fail(&c, diag, QF_ERR_EXEC, "宿主分配排序缓冲失败");
         }
-        int32_t keys[16];
-        uint8_t desc[16];
-        uint32_t nk = ast->order_count > 16 ? 16 : ast->order_count;
         for (uint32_t i = 0; i < nk; ++i) {
             int32_t col = ast->nodes[ast->order_by[i]].a;
             keys[i] = (col >= 0 && (uint32_t)col < out_schema->count) ? col : -1;

@@ -52,6 +52,7 @@ run_suite() {
 
 run_suite tests/e2e/data/users.csv  tests/e2e/queries.txt        users
 run_suite tests/e2e/data/groups.csv tests/e2e/groups_queries.txt groups
+run_suite tests/e2e/data/wide.csv   tests/e2e/wide_queries.txt   wide
 run_suite tests/e2e/data/quoted.csv tests/e2e/quoted_queries.txt quoted
 run_suite tests/e2e/data/empty.csv  tests/e2e/empty_queries.txt  empty
 
