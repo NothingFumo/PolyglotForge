@@ -31,15 +31,36 @@ static const char* err_name(qf_err e) {
     }
 }
 
-static void print_diag(const qf_diag* d) {
-    if (!d || d->code == QF_ERR_OK) return;
-    fprintf(stderr, "error[%s]: %.*s\n", err_name(d->code),
-            (int)(d->message.ptr ? d->message.len : 0),
-            d->message.ptr ? d->message.ptr : "");
-    if (d->hint.ptr && d->hint.len) {
+static const char* err_default(qf_err e) {
+    switch (e) {
+    case QF_ERR_ARG: return "参数无效";
+    case QF_ERR_IO: return "输入输出失败";
+    case QF_ERR_PARSE: return "解析失败";
+    case QF_ERR_TYPE: return "类型错误";
+    case QF_ERR_PLAN: return "计划构建失败";
+    case QF_ERR_EXEC: return "执行失败";
+    case QF_ERR_UDF: return "UDF 执行失败";
+    case QF_ERR_PANIC: return "内部错误";
+    case QF_ERR_UNSUPPORTED: return "不支持的功能";
+    default: return "未知错误";
+    }
+}
+
+/* 任何非零退出都必须有可读诊断：阶段未填 diag 时用返回码兜底。 */
+static void report_error(const qf_diag* d, qf_err rc) {
+    qf_err code = (d && d->code != QF_ERR_OK) ? d->code : rc;
+    if (code == QF_ERR_OK) code = QF_ERR_PANIC;
+    fprintf(stderr, "error[%s]: ", err_name(code));
+    if (d && d->message.ptr && d->message.len) {
+        fprintf(stderr, "%.*s", (int)d->message.len, d->message.ptr);
+    } else {
+        fprintf(stderr, "%s", err_default(code));
+    }
+    fprintf(stderr, "\n");
+    if (d && d->hint.ptr && d->hint.len) {
         fprintf(stderr, "hint: %.*s\n", (int)d->hint.len, d->hint.ptr);
     }
-    if (d->line) fprintf(stderr, "  at %u:%u\n", d->line, d->col);
+    if (d && d->line) fprintf(stderr, "  at %u:%u\n", d->line, d->col);
 }
 
 static qf_str S(const char* s) {
@@ -310,7 +331,7 @@ int main(int argc, char** argv) {
     if (plugin) {
         qf_err rc = qf_py_load(&host, S(plugin), &diag);
         if (rc != QF_ERR_OK) {
-            print_diag(&diag);
+            report_error(&diag, rc);
             qf_arena_free(arena);
             return 65;
         }
@@ -344,7 +365,7 @@ int main(int argc, char** argv) {
         env.quiet = 0;
         qf_err rc = qf_kt_batch(&host, batch_run_one, &bctx, parts, n, rows, &diag);
         if (rc != QF_ERR_OK) {
-            print_diag(&diag);
+            report_error(&diag, rc);
             status = 65;
         } else {
             for (uint32_t i = 0; i < n; ++i) printf("query %u: %llu rows\n", i + 1, (unsigned long long)rows[i]);
@@ -363,7 +384,7 @@ int main(int argc, char** argv) {
         /* 只给 --dsl 时没有位置 SQL：S(NULL) 会在 strlen 上崩，这里给空串。 */
         qf_err rc = exec_query(&env, sql ? S(sql) : S(""), &out, &diag);
         if (rc != QF_ERR_OK) {
-            print_diag(&diag);
+            report_error(&diag, rc);
             status = 65;
         } else {
             emit(&env, &out);

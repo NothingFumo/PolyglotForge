@@ -408,6 +408,28 @@ int main(void) {
         CHECK(rc == QF_ERR_OK && rn.row_count == 0, "空输入 GROUP BY 应为 0 行");
     }
 
+    /* 9. 失败路径必须带错误码与可读消息。 */
+    {
+        qf_diag bad;
+        qf_result rbad;
+        memset(&bad, 0, sizeof bad);
+        memset(&rbad, 0, sizeof rbad);
+        rc = qf_engine_execute(&host, arena, &ast, &table, &out_schema,
+                               NULL, NULL, NULL, &rbad, &bad);
+        CHECK(rc == QF_ERR_ARG, "空批次应返回 QF_ERR_ARG");
+        CHECK(bad.code == QF_ERR_ARG, "空批次应写入错误码");
+        CHECK(bad.message.ptr != NULL && bad.message.len > 0, "空批次应写入诊断消息");
+
+        qf_value one[2] = { t("Ann"), i64(30) };
+        qf_batch wrong = {1, 1, one};
+        memset(&bad, 0, sizeof bad);
+        rc = qf_engine_execute(&host, arena, &ast, &table, &out_schema,
+                               &wrong, NULL, NULL, &rbad, &bad);
+        CHECK(rc == QF_ERR_ARG, "列数不一致应返回 QF_ERR_ARG");
+        CHECK(bad.code == QF_ERR_ARG && bad.message.ptr != NULL && bad.message.len > 0,
+              "列数不一致应写入诊断");
+    }
+
     qf_arena_free(arena);
     if (failures) {
         printf("c stage FAILED (%d)\n", failures);

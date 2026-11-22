@@ -1073,7 +1073,18 @@ qf_err Parser::run(qf_ast** out, qf_diag* diag) {
 } /* namespace */
 
 extern "C" qf_err qf_sql_parse(const qf_host* host, qf_str sql, qf_ast** out, qf_diag* diag) {
-    if (!out) return QF_ERR_ARG;
+    if (!out) {
+        if (diag) {
+            std::memset(diag, 0, sizeof *diag);
+            diag->code = QF_ERR_ARG;
+            diag->line = 1;
+            diag->col = 1;
+            static const char kMsg[] = "输出指针为空";
+            diag->message.ptr = kMsg;
+            diag->message.len = (uint32_t)(sizeof kMsg - 1);
+        }
+        return QF_ERR_ARG;
+    }
     *out = nullptr;
 
     if (!host || !host->alloc || !host->str) {

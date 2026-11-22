@@ -1128,6 +1128,15 @@ unsafe fn run(
     diag: *mut qf_diag,
 ) -> qf_err {
     if host.is_null() {
+        if !diag.is_null() {
+            let msg: &[u8] = "qf_host 为空".as_bytes();
+            let d = &mut *diag;
+            d.code = QF_ERR_ARG;
+            d.line = 0;
+            d.col = 0;
+            d.message = qf_str { ptr: msg.as_ptr(), len: msg.len() as u32 };
+            d.hint = EMPTY_STR;
+        }
         return QF_ERR_ARG;
     }
     let h = &*host;

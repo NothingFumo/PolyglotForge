@@ -68,6 +68,23 @@ static int truth(qf_value v) {
     return -1;
 }
 
+/* 失败路径统一写诊断：任何非零返回都必须带错误码与可读消息。
+   host 不可用时退回静态字面量，生命周期与进程一致。 */
+static qf_err engine_fail(const qf_engine_ctx* c, qf_diag* diag, qf_err code,
+                          const char* msg) {
+    if (diag) {
+        memset(diag, 0, sizeof *diag);
+        diag->code = code;
+        diag->message.ptr = msg;
+        diag->message.len = (uint32_t)strlen(msg);
+        if (c && c->host && c->host->str) {
+            qf_str copied = c->host->str(c->host->ctx, msg, diag->message.len);
+            if (copied.ptr && copied.len) diag->message = copied;
+        }
+    }
+    return code;
+}
+
 static qf_err uf_call(const qf_engine_ctx* c, const qf_node* n, const qf_value* row,
                       qf_value* out, qf_diag* diag);
 
@@ -301,8 +318,14 @@ static int select_has_agg(const qf_ast* ast) {
 static qf_err row_keep(const qf_engine_ctx* c, const qf_batch* in, const qf_ast* ast,
                        qf_filter_fn filter, void* fctx, uint8_t** out_keep, qf_diag* diag) {
     *out_keep = (uint8_t*)qf_arena_alloc(c->arena, in->rows ? in->rows : 1, 1);
-    if (!*out_keep) return QF_ERR_EXEC;
-    if (filter) return filter(fctx, in, *out_keep, diag);
+    if (!*out_keep) return engine_fail(c, diag, QF_ERR_EXEC, "宿主分配过滤掩码失败");
+    if (filter) {
+        qf_err rc = filter(fctx, in, *out_keep, diag);
+        if (rc != QF_ERR_OK && (!diag || diag->code == QF_ERR_OK)) {
+            return engine_fail(c, diag, rc, "过滤阶段失败");
+        }
+        return rc;
+    }
     if (ast->where_root < 0) {
         memset(*out_keep, 1, in->rows ? in->rows : 1);
         return QF_ERR_OK;
@@ -379,7 +402,10 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
     c.ast = ast;
     c.table = table;
 
-    if (!in || in->cols != table->count) return QF_ERR_ARG;
+    if (!in) return engine_fail(&c, diag, QF_ERR_ARG, "qf_engine_execute 收到空批次");
+    if (in->cols != table->count) {
+        return engine_fail(&c, diag, QF_ERR_ARG, "批次列数与表定义不一致");
+    }
 
     uint8_t* keep = NULL;
     qf_err rc = row_keep(&c, in, ast, filter, fctx, &keep, diag);
@@ -392,7 +418,7 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
     out->row_count = 0;
     out->values = (qf_value*)qf_arena_alloc(
         arena, (uint64_t)(rows ? rows : 1) * out_schema->count * sizeof(qf_value), 8);
-    if (!out->values) return QF_ERR_EXEC;
+    if (!out->values) return engine_fail(&c, diag, QF_ERR_EXEC, "宿主分配结果集失败");
 
     int has_agg = select_has_agg(ast);
 
@@ -401,7 +427,7 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
         uint32_t cap = 64, ngroups = 0;
         uint32_t* group_first = (uint32_t*)qf_arena_alloc(
             arena, (uint64_t)cap * sizeof(uint32_t), 4);
-        if (!group_first) return QF_ERR_EXEC;
+        if (!group_first) return engine_fail(&c, diag, QF_ERR_EXEC, "宿主分配分组索引失败");
 
         for (uint32_t r = 0; r < in->rows; ++r) {
             if (!keep[r]) continue;
@@ -428,10 +454,12 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
             if (g == ngroups) {
                 if (ngroups == cap) {
                     uint64_t newcap = (uint64_t)cap * 2;
-                    if (newcap > UINT32_MAX) return QF_ERR_EXEC;
+                    if (newcap > UINT32_MAX) {
+                        return engine_fail(&c, diag, QF_ERR_EXEC, "分组数超出 uint32 范围");
+                    }
                     uint32_t* grown = (uint32_t*)qf_arena_alloc(
                         arena, newcap * sizeof(uint32_t), 4);
-                    if (!grown) return QF_ERR_EXEC;
+                    if (!grown) return engine_fail(&c, diag, QF_ERR_EXEC, "宿主分配分组索引失败");
                     memcpy(grown, group_first, (size_t)ngroups * sizeof(uint32_t));
                     group_first = grown;
                     cap = (uint32_t)newcap;
@@ -518,7 +546,9 @@ qf_err qf_engine_execute(const qf_host* host, qf_arena* arena, const qf_ast* ast
         uint32_t* swap = (uint32_t*)qf_arena_alloc(arena, (uint64_t)n * sizeof(uint32_t), 4);
         qf_value* tmp = (qf_value*)qf_arena_alloc(
             arena, (uint64_t)n * out_schema->count * sizeof(qf_value), 8);
-        if (!idx || !swap || !tmp) return QF_ERR_EXEC;
+        if (!idx || !swap || !tmp) {
+            return engine_fail(&c, diag, QF_ERR_EXEC, "宿主分配排序缓冲失败");
+        }
         int32_t keys[16];
         uint8_t desc[16];
         uint32_t nk = ast->order_count > 16 ? 16 : ast->order_count;
