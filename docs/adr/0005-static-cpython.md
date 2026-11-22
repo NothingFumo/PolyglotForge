@@ -1,6 +1,6 @@
 # Python 走自建静态 CPython，标准库以 payload 形式落地
 
-CPython 的 Windows 构建默认产出 DLL；把 `pythoncore` 的 Configuration Type 改成 Static Library 并定义 `Py_NO_ENABLE_SHARED`，即可得到含全部 C API 的静态库，被 MinGW 主干链接进出。标准库是 `.py` 文件而非代码，无法静态链接，因此打 zip 内嵌、首次运行解包到 `%LOCALAPPDATA%\PolyglotForge\payload-<hash>\`。
+CPython 的 Windows 构建默认产出 DLL；把 `pythoncore` 的 Configuration Type 改成 Static Library 并定义 `Py_NO_ENABLE_SHARED`，即可得到含全部 C API 的静态库，被 MinGW 主干链接进出。标准库是 `.py` 文件而非代码，无法静态链接，因此打 zip 内嵌并以只读段链入，运行期由内存 finder 读取（不落盘）。
 
 ## 考虑的方案
 

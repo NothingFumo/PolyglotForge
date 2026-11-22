@@ -28,8 +28,10 @@ cmd /c scripts\msvc-static.bat         :: MSVC 静态 → dist/queryforge-static
 ```
 
 前置条件：gcc/g++（MinGW-w64）、Rust、Go、Kotlin/Native、Node 或 Bun、CPython 3.11 源码、
-Visual Studio（含 C++ 工具集与 NativeAOT 运行时包）。缺失某个语言阶段时可用
-`bash scripts/build.sh --allow-missing` 继续，未就位的阶段由 `stages/stubs` 占位。
+Visual Studio（含 C++ 工具集与 NativeAOT 运行时包）。换机器先跑
+`python scripts/env.py --check` 看哪项没探测到。缺失某个语言阶段时可用
+`bash scripts/build.sh --allow-missing` 继续，未就位的阶段由 `stages/stubs` 占位；
+两个 `.bat` 会在阶段归档缺失时自动调用 `scripts/produce.py` 补齐。
 
 ## 运行
 
@@ -65,12 +67,14 @@ Visual Studio（含 C++ 工具集与 NativeAOT 运行时包）。缺失某个语
 
 ```bash
 bash tests/e2e/run.sh ./dist/queryforge.exe 10        # 与 sqlite3 逐字节对照
-bash tests/e2e/portability.sh                         # 清空 PATH 后逐个启动产物
+bash tests/e2e/abi.sh                                 # 阶段导出符号是否都在 qf.h 里
+bash tests/e2e/portability.sh                         # 干净 PATH 启动 + 随包 DLL + 零落盘
 ```
 
-`portability.sh` 会检查：动态产物需要的第三方 DLL 是否在 `dist/` 内，静态产物的导入表
-里是否出现 `vcruntime`/`libstdc++`/`winpthread`，以及四个 exe 在仅有 `C:\Windows\system32`
-的 `PATH` 下是否能正常输出结果。
+`portability.sh` 会检查：动态产物需要的第三方 DLL 是否在 `dist/` 内（含 DLL 自身的依赖），
+静态产物的导入表里是否出现 `vcruntime`/`libstdc++`/`winpthread`，四个 exe 在仅有
+`C:\Windows\system32` 的 `PATH` 下能否输出结果，以及 Python UDF 运行后临时目录是否为空
+（零落盘）。`abi.sh` 用 `nm` 对比阶段归档的导出与 `contracts/qf.h` 的声明，拦"契约外入口"。
 
 ## 目录
 
@@ -81,23 +85,28 @@ bash tests/e2e/portability.sh                         # 清空 PATH 后逐个启
 | `gen/` | codegen 产物（入库，保证任意提交都可编译） |
 | `stages/<lang>/` | 各语言阶段实现、构建脚本与自测 |
 | `tests/e2e/` | 端到端验收与 sqlite3 对照 |
-| `scripts/` | `build.sh`（gcc 装配）、`msvc-all.bat`、`msvc-static.bat` |
+| `scripts/` | `stages.py`（阶段清单）、`env.py`（工具探测）、`produce.py`/`produce.sh`（产物生成）、`build.sh`、`msvc-all.bat`、`msvc-static.bat` |
 | `docs/adr/` | 架构决策记录 |
 | `dist/` | 构建产物（exe 与随包 DLL，不入库） |
 
 ## Python 阶段
 
-标准库作为载荷内嵌在 `.rdata`，运行期不写临时文件：构建时把 `Lib/` 压成 `lib.zip`
-（排除 test/tkinter），用 `ld -r -b binary` 链入；解释器初始化后把该段字节交给内嵌
-zip finder（`_struct` 解析中央目录、`zlib` 解压、`compile`），`encodings` 则在构建期
-冻结进 `Python/frozen.c` 的 `stdlib_modules[]`。
+标准库作为载荷内嵌，运行期不写临时文件：
+
+- `lib.zip`（`Lib/` 去掉 test/tkinter）用 `ld -r -b binary` 生成对象，再用
+  `objcopy --rename-section .data=.rdata,alloc,load,readonly,...` 改成只读段；
+- 解释器初始化后把该段字节交给内嵌 zip finder（`_struct` 解析中央目录、`zlib` 解压、
+  `compile`）；
+- `encodings` 由 `scripts/freeze_encodings.py --install` 在构建 `pythoncore` 之前写入
+  `Python/frozen.c` 的 `stdlib_modules[]`（`is_package=1`），这是唯一的冻结机制，
+  运行期不再拼表。
 
 ```bash
 ./dist/queryforge.exe tests/e2e/data/users.csv \
     "select stdlib_origin(1) as p from t limit 1" \
     --plugin stages/python/fixtures/probe_path.py --raw
 # p
-# frozen | <builtin>
+# frozen | <zip>/json/__init__.py
 ```
 
 ## 决策记录

@@ -1,6 +1,6 @@
 # 单文件产物：静态链接为主，仅允许 Python 标准库载荷
 
-九种语言必须交付一个 `queryforge.exe`。C / C++ / Rust / Go / C# / Kotlin(Native) / JS(QuickJS) 在 MinGW 主干下真静态链接；Python 以自建静态 `python.lib` 链入，但标准库文本以 zip 资源内嵌、首次运行解包到 `%LOCALAPPDATA%\PolyglotForge\payload-<hash>\`。这样目标机零依赖，而"解包"只发生在资源层，不是运行时依赖。
+九种语言必须交付一个 `queryforge.exe`。C / C++ / Rust / Go / C# / Kotlin(Native) / JS(QuickJS) 在 MinGW 主干下真静态链接；Python 以自建静态 `python.lib` 链入，标准库文本以 zip 资源内嵌，运行期由内存 finder 直接读取（不落盘）。这样目标机零依赖，也不需要任何释放目录。
 
 ## 考虑的方案
 
